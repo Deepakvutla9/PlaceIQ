@@ -88,6 +88,13 @@ export default function Dashboard() {
 
   const recent = consultants.slice(0, 6)
 
+  // Consultants becoming available within 14 days
+  const comingAvailable = consultants.filter(c => {
+    if (!c.available_from) return false
+    const days = Math.ceil((new Date(c.available_from) - new Date()) / (1000 * 60 * 60 * 24))
+    return days >= 0 && days <= 14
+  }).sort((a, b) => new Date(a.available_from) - new Date(b.available_from))
+
   return (
     <div style={{ padding: '32px 36px', maxWidth: 1300 }}>
       {/* Header */}
@@ -198,6 +205,39 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Coming Available Soon */}
+      {comingAvailable.length > 0 && (
+        <div style={{ ...card, marginBottom: 20, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 24px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Clock size={15} color="#6c63ff" />
+            <p style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Coming Available — {comingAvailable.length} consultant{comingAvailable.length > 1 ? 's' : ''} within 14 days</p>
+            <button onClick={() => navigate('/hotdesk')} style={{ marginLeft: 'auto', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+              Match Now →
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 0 }}>
+            {comingAvailable.map((c, i) => {
+              const days = Math.ceil((new Date(c.available_from) - new Date()) / (1000 * 60 * 60 * 24))
+              const label = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`
+              return (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 24px', borderBottom: '1px solid #f9fafb', borderRight: i % 2 === 0 ? '1px solid #f9fafb' : 'none' }}>
+                  <div style={{ width: 36, height: 36, background: '#ede9fe', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#6c63ff', flexShrink: 0 }}>
+                    {c.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{c.name}</p>
+                    <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.visa_status} · ${c.rate}/hr</p>
+                  </div>
+                  <span style={{ background: days <= 3 ? '#d1fae5' : '#ede9fe', color: days <= 3 ? '#065f46' : '#5b21b6', borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                    {label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Follow-up Reminders */}
       {staleSubmissions.length > 0 && (

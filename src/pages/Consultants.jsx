@@ -14,7 +14,7 @@ const STATUS_STYLE = {
   upcoming:    { bg: '#f3f4f6', color: '#374151' },
 }
 
-const EMPTY_FORM = { name: '', email: '', phone: '', skills: '', visa_status: 'H1B', location: '', rate: '', experience: '', status: 'bench', notes: '' }
+const EMPTY_FORM = { name: '', email: '', phone: '', skills: '', visa_status: 'H1B', location: '', rate: '', experience: '', status: 'bench', notes: '', available_from: '' }
 
 function Field({ label, children }) {
   return (
@@ -137,7 +137,7 @@ export default function Consultants() {
   }
 
   function handleEdit(c) {
-    setForm({ name: c.name, email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, rate: c.rate, experience: c.experience || '', status: c.status, notes: c.notes || '' })
+    setForm({ name: c.name, email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, rate: c.rate, experience: c.experience || '', status: c.status, notes: c.notes || '', available_from: c.available_from || '' })
     setEditing(c.id)
     setResumeFile(null)
     setShowForm(true)
@@ -208,6 +208,12 @@ export default function Consultants() {
                   </td>
                   <td style={{ padding: '14px 16px', maxWidth: 200 }}>
                     <p style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{c.skills}</p>
+                    {c.available_from && (() => {
+                      const days = Math.ceil((new Date(c.available_from) - new Date()) / (1000 * 60 * 60 * 24))
+                      const label = days <= 0 ? 'Available now' : days === 1 ? 'Tomorrow' : `In ${days}d`
+                      const isNear = days <= 7
+                      return <span style={{ fontSize: 10, fontWeight: 600, color: isNear ? '#065f46' : '#6b7280', background: isNear ? '#d1fae5' : '#f3f4f6', borderRadius: 99, padding: '2px 7px', marginTop: 4, display: 'inline-block' }}>{label}</span>
+                    })()}
                   </td>
                   <td style={{ padding: '14px 16px' }}>
                     <span style={{ background: '#f3f4f6', color: '#374151', borderRadius: 6, padding: '3px 8px', fontSize: 12, fontWeight: 500 }}>{c.visa_status}</span>
@@ -313,6 +319,9 @@ export default function Consultants() {
                 </Field>
                 <Field label="Experience (years)">
                   <input type="number" value={form.experience} onChange={e => setForm(f => ({ ...f, experience: e.target.value }))} placeholder="5" />
+                </Field>
+                <Field label="Available From">
+                  <input type="date" value={form.available_from} onChange={e => setForm(f => ({ ...f, available_from: e.target.value }))} />
                 </Field>
                 <Field label="Visa Status">
                   <select value={form.visa_status} onChange={e => setForm(f => ({ ...f, visa_status: e.target.value }))}>
