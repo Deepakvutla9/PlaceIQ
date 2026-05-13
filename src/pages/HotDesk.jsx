@@ -100,7 +100,9 @@ export default function HotDesk() {
   const [selectedVendors, setSelectedVendors] = useState([])
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [emailType, setEmailType] = useState('submission')
   const [submissionType, setSubmissionType] = useState('C2C')
+  const [coldContext, setColdContext] = useState('')
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendProgress, setSendProgress] = useState('')
@@ -236,28 +238,45 @@ Reference 2: ${c.reference2 || ''}
   }
 
   async function generateEmail() {
-    if (!selectedConsultants.length) { setSendError('Select at least one consultant'); return }
+    if (emailType !== 'cold' && !selectedConsultants.length) { setSendError('Select at least one consultant'); return }
+    if (emailType === 'cold' && !coldContext.trim()) { setSendError('Enter context for the cold email'); return }
     setGenerating(true)
     setSendError('')
-    const profiles = selectedConsultants.map(c =>
-      `• ${c.name} | ${c.visa_status} | ${c.employment_type || ''} | ${c.location} | $${c.rate}/hr | ${c.experience} yrs exp | Skills: ${c.skills}`
-    ).join('\n')
 
-    const employmentNote = submissionType === 'C2C'
-      ? 'This is a C2C (Corp to Corp) submission. Mention that the consultant is available for C2C engagements.'
-      : submissionType === 'W2'
-      ? 'This is a W2 submission. Mention that the consultant is open for W2 positions.'
-      : 'This is a Fulltime submission. Mention that the consultant is open for fulltime/permanent roles.'
     const jdContext = jobReq ? `Job Role: ${jobReq.title || ''}\nRequired Skills: ${jobReq.skills?.join(', ') || ''}` : ''
-    const prompt = `Write a short, professional bench sales recruiter email to send to vendors/primes introducing available consultants. The email should be a brief, compelling intro — do NOT list individual consultant details like rate, location, visa status, or skills in the body. Those details will be provided separately in a submission format below the email. Just write a warm, professional 2-3 sentence intro that mentions the number of consultants and the general role/skill area, and invites the vendor to review the profiles.
+    const SIGN_OFF = 'Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Start with the greeting: "Hi {{VENDOR_NAME}}," on its own line — this placeholder will be replaced with the actual contact name per vendor. Sign off as "PlaceIQ Recruiting Team".'
+
+    let prompt = ''
+
+    if (emailType === 'submission') {
+      const employmentNote = submissionType === 'C2C'
+        ? 'This is a C2C (Corp to Corp) submission. Mention that the consultant is available for C2C engagements.'
+        : submissionType === 'W2'
+        ? 'This is a W2 submission. Mention that the consultant is open for W2 positions.'
+        : 'This is a Fulltime submission. Mention that the consultant is open for fulltime/permanent roles.'
+      prompt = `Write a short, professional bench sales recruiter email introducing a consultant for submission. Keep it to a brief 2-3 sentence intro — do NOT list consultant details in the body as those are in the submission format below. Invite the vendor to review the profile.
 
 ${jdContext}
 ${employmentNote}
-
 Consultant count: ${selectedConsultants.length}
 General skill area: ${selectedConsultants.map(c => c.skills?.split(',')[0]).filter(Boolean).join(', ')}
 
-Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Start with the greeting: "Hi {{VENDOR_NAME}}," on its own line — this placeholder will be replaced with the actual contact name per vendor. Sign off as "PlaceIQ Recruiting Team".`
+${SIGN_OFF}`
+
+    } else if (emailType === 'hotlist') {
+      prompt = `Write a short, professional bench sales recruiter hotlist email to vendors. Mention you are sharing a hotlist of ${selectedConsultants.length} available consultant${selectedConsultants.length > 1 ? 's' : ''} and invite them to reach out for any matching requirements. Keep it to 2-3 sentences — do not describe individual consultants in the body, the table is included separately.
+
+${jdContext}
+
+${SIGN_OFF}`
+
+    } else {
+      prompt = `Write a professional cold outreach email from a bench sales recruiter to a vendor/prime. Context: ${coldContext}
+
+${jdContext}
+
+${SIGN_OFF}`
+    }
 
     const result = await chat(prompt)
     const lines = result.split('\n')
@@ -265,8 +284,23 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
     if (subjectLine) setSubject(subjectLine.replace('Subject:', '').trim())
     const bodyStart = lines.findIndex(l => l.startsWith('Subject:')) + 2
     const aiBody = lines.slice(bodyStart).join('\n').trim()
-    const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
-    setBody(`${aiBody}\n\n${submissionForms}`)
+
+    if (emailType === 'submission') {
+      const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
+      setBody(`${aiBody}\n\n${submissionForms}`)
+    } else if (emailType === 'hotlist') {
+      const colW = [28, 36, 12, 20]
+      const pad = (s, w) => String(s || '').slice(0, w).padEnd(w)
+      const divider = colW.map(w => '-'.repeat(w)).join('-+-')
+      const header = `${pad('Name', colW[0])} | ${pad('Skills', colW[1])} | ${pad('Exp', colW[2])} | ${pad('Location', colW[3])}`
+      const rows = selectedConsultants.map(c =>
+        `${pad(c.name, colW[0])} | ${pad(c.skills, colW[1])} | ${pad(c.experience ? `${c.experience} yrs` : '-', colW[2])} | ${pad(c.location, colW[3])}`
+      ).join('\n')
+      setBody(`${aiBody}\n\n${header}\n${divider}\n${rows}`)
+    } else {
+      setBody(aiBody)
+    }
+
     setGenerating(false)
   }
 
@@ -681,17 +715,44 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
               </div>
             </div>
 
-            {/* Submission type selector */}
+            {/* Email type selector */}
             <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Submission Type</p>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {['C2C', 'W2', 'Fulltime'].map(type => (
-                  <button key={type} onClick={() => setSubmissionType(type)}
-                    style={{ flex: 1, padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 8, border: `1.5px solid ${submissionType === type ? '#6c63ff' : '#e5e7eb'}`, background: submissionType === type ? '#6c63ff' : '#fff', color: submissionType === type ? '#fff' : '#6b7280', cursor: 'pointer', transition: 'all 0.15s' }}>
-                    {type}
+              <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Email Type</p>
+              <div style={{ display: 'flex', gap: 6, marginBottom: emailType === 'submission' || emailType === 'cold' ? 12 : 0 }}>
+                {[
+                  { key: 'submission', label: 'Submission' },
+                  { key: 'hotlist', label: 'Hotlist' },
+                  { key: 'cold', label: 'Cold Email' },
+                ].map(({ key, label }) => (
+                  <button key={key} onClick={() => setEmailType(key)}
+                    style={{ flex: 1, padding: '8px 0', fontSize: 12, fontWeight: 600, borderRadius: 8, border: `1.5px solid ${emailType === key ? '#6c63ff' : '#e5e7eb'}`, background: emailType === key ? '#6c63ff' : '#fff', color: emailType === key ? '#fff' : '#6b7280', cursor: 'pointer', transition: 'all 0.15s' }}>
+                    {label}
                   </button>
                 ))}
               </div>
+              {/* Submission: C2C/W2/Fulltime sub-type */}
+              {emailType === 'submission' && (
+                <div>
+                  <p style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>Applying as</p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {['C2C', 'W2', 'Fulltime'].map(type => (
+                      <button key={type} onClick={() => setSubmissionType(type)}
+                        style={{ flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600, borderRadius: 7, border: `1.5px solid ${submissionType === type ? '#10b981' : '#e5e7eb'}`, background: submissionType === type ? '#d1fae5' : '#f9fafb', color: submissionType === type ? '#065f46' : '#6b7280', cursor: 'pointer', transition: 'all 0.15s' }}>
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Cold email: context input */}
+              {emailType === 'cold' && (
+                <div>
+                  <p style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>What's the purpose of this email?</p>
+                  <textarea value={coldContext} onChange={e => setColdContext(e.target.value)} rows={3}
+                    placeholder="e.g. Introducing our bench sales services to a new vendor, following up after a conference, reaching out about a partnership..."
+                    style={{ resize: 'none', fontSize: 12, width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 8, padding: '8px 10px', color: '#374151', boxSizing: 'border-box', lineHeight: 1.5 }} />
+                </div>
+              )}
             </div>
 
             <button onClick={generateEmail} disabled={generating || !selectedConsultants.length}
