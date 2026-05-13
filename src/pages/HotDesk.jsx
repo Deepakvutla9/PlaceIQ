@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw, BookOpen, Save, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { extractJobRequirements, matchConsultants, chat } from '../lib/groq'
 import { signInMicrosoft, getValidOutlookToken } from '../lib/microsoft'
+import { useAuth } from '../context/AuthContext'
 
 const card = { background: '#fff', borderRadius: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' }
 
@@ -74,6 +75,7 @@ async function sendGmailEmail(token, to, subject, body, attachments = []) {
 }
 
 export default function HotDesk() {
+  const { user } = useAuth()
   const [step, setStep] = useState('match')
 
   // Step 1 — Match
@@ -100,9 +102,17 @@ export default function HotDesk() {
   const [body, setBody] = useState('')
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendProgress, setSendProgress] = useState('')   // e.g. "Sending 2 / 5..."
-  const [sendResults, setSendResults] = useState([])     // [{ vendor, ok, error }]
+  const [sendProgress, setSendProgress] = useState('')
+  const [sendResults, setSendResults] = useState([])
   const [sendError, setSendError] = useState('')
+
+  // Templates
+  const [templates, setTemplates] = useState([])
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false)
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [saveTemplateName, setSaveTemplateName] = useState('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const templateDropdownRef = useRef()
 
   const gmailConnected = !!gmailToken
   const outlookConnected = !!outlookToken
@@ -125,7 +135,30 @@ export default function HotDesk() {
 
   useEffect(() => {
     supabase.from('vendors').select('*').then(({ data }) => setVendors(data || []))
+    supabase.from('email_templates').select('*').order('created_at', { ascending: false }).then(({ data }) => setTemplates(data || []))
   }, [])
+
+  function loadTemplate(t) {
+    setSubject(t.subject)
+    setBody(t.body)
+    setShowTemplateDropdown(false)
+  }
+
+  async function saveTemplate() {
+    if (!saveTemplateName.trim() || !subject || !body) return
+    setSavingTemplate(true)
+    await supabase.from('email_templates').insert({ user_id: user.id, name: saveTemplateName.trim(), subject, body })
+    const { data } = await supabase.from('email_templates').select('*').order('created_at', { ascending: false })
+    setTemplates(data || [])
+    setShowSaveModal(false)
+    setSaveTemplateName('')
+    setSavingTemplate(false)
+  }
+
+  async function deleteTemplate(id) {
+    await supabase.from('email_templates').delete().eq('id', id)
+    setTemplates(prev => prev.filter(t => t.id !== id))
+  }
 
   async function handleMatch() {
     if (!jdText.trim()) return
@@ -646,6 +679,45 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
             )}
 
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+
+              {/* Template toolbar */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ position: 'relative' }} ref={templateDropdownRef}>
+                  <button onClick={() => setShowTemplateDropdown(p => !p)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                    <BookOpen size={13} /> Load Template {templates.length > 0 && `(${templates.length})`}
+                  </button>
+                  {showTemplateDropdown && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.1)', zIndex: 50, minWidth: 260, maxHeight: 280, overflowY: 'auto' }}>
+                      {templates.length === 0 ? (
+                        <p style={{ padding: '16px', fontSize: 13, color: '#9ca3af', textAlign: 'center' }}>No templates saved yet</p>
+                      ) : templates.map(t => (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}
+                          onMouseOver={e => e.currentTarget.style.background = '#f9fafb'}
+                          onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ flex: 1, minWidth: 0 }} onClick={() => loadTemplate(t)}>
+                            <p style={{ fontWeight: 600, fontSize: 13, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</p>
+                            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</p>
+                          </div>
+                          <button onClick={e => { e.stopPropagation(); deleteTemplate(t.id) }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 2, flexShrink: 0 }}
+                            onMouseOver={e => e.currentTarget.style.color = '#ef4444'}
+                            onMouseOut={e => e.currentTarget.style.color = '#d1d5db'}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {subject && body && (
+                  <button onClick={() => setShowSaveModal(true)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                    <Save size={13} /> Save as Template
+                  </button>
+                )}
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Subject</label>
                 <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Consultant profiles for your open requirements..."
@@ -679,6 +751,31 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                     : <><Send size={14} /> {selectedVendors.length > 1 ? `Blast to ${selectedVendors.length} Vendors` : 'Send Email'}</>}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Template Modal */}
+      {showSaveModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 400, boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 6 }}>Save as Template</h3>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Give this email a name so you can reuse it later.</p>
+            <input value={saveTemplateName} onChange={e => setSaveTemplateName(e.target.value)}
+              placeholder="e.g. Java Developer Intro, Follow-up Email..."
+              style={{ width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 9, padding: '10px 12px', fontSize: 13, color: '#374151', boxSizing: 'border-box', marginBottom: 16 }}
+              onKeyDown={e => e.key === 'Enter' && saveTemplate()} autoFocus />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setShowSaveModal(false); setSaveTemplateName('') }}
+                style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#6b7280', background: '#f3f4f6', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={saveTemplate} disabled={savingTemplate || !saveTemplateName.trim()}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#fff', background: savingTemplate || !saveTemplateName.trim() ? '#a5b4fc' : '#6c63ff', border: 'none', borderRadius: 8, cursor: savingTemplate || !saveTemplateName.trim() ? 'not-allowed' : 'pointer' }}>
+                {savingTemplate ? <Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={13} />}
+                Save Template
+              </button>
             </div>
           </div>
         </div>
