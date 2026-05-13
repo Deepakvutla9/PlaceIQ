@@ -86,7 +86,7 @@ async function exchangeCode(code, verifier) {
   return { accessToken: data.access_token, account: data.id_token || 'outlook_user' }
 }
 
-async function refreshAccessToken() {
+export async function refreshAccessToken() {
   const refreshToken = localStorage.getItem('outlook_refresh_token')
   if (!refreshToken) throw new Error('No refresh token')
 

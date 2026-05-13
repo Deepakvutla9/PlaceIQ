@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw, BookOpen, Save, Trash2, Paperclip, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { extractJobRequirements, matchConsultants, chat } from '../lib/groq'
-import { signInMicrosoft, getValidOutlookToken } from '../lib/microsoft'
+import { signInMicrosoft, getValidOutlookToken, refreshAccessToken } from '../lib/microsoft'
 import { useAuth } from '../context/AuthContext'
 
 const card = { background: '#fff', borderRadius: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' }
@@ -340,14 +340,20 @@ ${SIGN_OFF}`
 
     let freshToken = null
     if (sendVia === 'outlook') {
-      freshToken = await getValidOutlookToken()
+      // Force a refresh attempt regardless of expiry timestamp
+      try {
+        freshToken = await refreshAccessToken()
+        localStorage.setItem('outlook_token', freshToken)
+        setOutlookToken(freshToken)
+      } catch {
+        freshToken = await getValidOutlookToken()
+      }
       if (!freshToken) {
         localStorage.removeItem('outlook_token')
         setOutlookToken('')
         setSendError('Outlook session expired. Click Reconnect Outlook.')
         setSending(false); return
       }
-      if (freshToken !== outlookToken) setOutlookToken(freshToken)
     }
 
     const results = []
