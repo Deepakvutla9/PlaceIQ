@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, Briefcase, TrendingUp, Clock, ArrowUpRight, Mail, Building2, Zap } from 'lucide-react'
+import { Users, Briefcase, TrendingUp, Clock, ArrowUpRight, Mail, Building2, Zap, Bell } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -34,16 +34,22 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [consultants, setConsultants] = useState([])
   const [vendors, setVendors] = useState([])
+  const [staleSubmissions, setStaleSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
-      const [{ data: cons }, { data: vens }] = await Promise.all([
+      const [{ data: cons }, { data: vens }, { data: subs }] = await Promise.all([
         supabase.from('consultants').select('*').order('created_at', { ascending: false }),
         supabase.from('vendors').select('*').order('created_at', { ascending: false }),
+        supabase.from('submissions').select('*, consultants(name, visa_status), vendors(company, email)').eq('status', 'submitted').order('submitted_at', { ascending: true }),
       ])
       setConsultants(cons || [])
       setVendors(vens || [])
+
+      // Flag submissions stuck in "submitted" for 3+ days
+      const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000
+      setStaleSubmissions((subs || []).filter(s => new Date(s.submitted_at).getTime() < threeDaysAgo))
       setLoading(false)
     }
     load()
@@ -90,9 +96,9 @@ export default function Dashboard() {
           <h1 style={{ fontSize: 26, fontWeight: 700, color: '#111827', letterSpacing: '-0.5px' }}>Dashboard</h1>
           <p style={{ color: '#6b7280', fontSize: 14, marginTop: 4 }}>Welcome back — here's your bench pipeline overview</p>
         </div>
-        <button onClick={() => navigate('/matcher')}
+        <button onClick={() => navigate('/hotdesk')}
           style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          <Zap size={14} /> Run AI Matcher
+          <Zap size={14} /> Open HotDesk
         </button>
       </div>
 
@@ -169,7 +175,7 @@ export default function Dashboard() {
             <Zap size={20} color="rgba(255,255,255,0.8)" style={{ marginBottom: 10 }} />
             <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 14, marginBottom: 6 }}>AI Matcher</h3>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, lineHeight: 1.6, marginBottom: 14 }}>Paste a job description and get instant match scores.</p>
-            <button onClick={() => navigate('/matcher')} style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Open Matcher →</button>
+            <button onClick={() => navigate('/hotdesk')} style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Open HotDesk →</button>
           </div>
 
           <div style={{ ...card, padding: 20 }}>
@@ -192,6 +198,56 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Follow-up Reminders */}
+      {staleSubmissions.length > 0 && (
+        <div style={{ ...card, marginBottom: 20, overflow: 'hidden' }}>
+          <div style={{ padding: '16px 24px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, background: '#fef3c7', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Bell size={15} color="#d97706" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>Follow-up Needed — {staleSubmissions.length} submission{staleSubmissions.length > 1 ? 's' : ''} with no update for 3+ days</p>
+              <p style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Consider following up with these vendors</p>
+            </div>
+            <button onClick={() => navigate('/tracker')} style={{ marginLeft: 'auto', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+              View in Tracker →
+            </button>
+          </div>
+          <div>
+            {staleSubmissions.slice(0, 5).map((s, i) => {
+              const days = Math.floor((Date.now() - new Date(s.submitted_at).getTime()) / (1000 * 60 * 60 * 24))
+              return (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 24px', borderBottom: i < Math.min(staleSubmissions.length, 5) - 1 ? '1px solid #f3f4f6' : 'none', background: '#fff' }}>
+                  <div style={{ width: 34, height: 34, background: '#ede9fe', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#6c63ff', flexShrink: 0 }}>
+                    {(s.consultants?.name || '?').slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{s.consultants?.name || 'Unknown'}</p>
+                    <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>{s.job_title || 'Untitled Role'} · {s.vendors?.company || 'Unknown vendor'}</p>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <span style={{ background: '#fef3c7', color: '#92400e', borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>{days}d waiting</span>
+                    {s.vendors?.email && (
+                      <a href={`mailto:${s.vendors.email}?subject=Follow up: ${s.job_title || 'Consultant Submission'}`}
+                        style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#6c63ff', fontWeight: 600, textDecoration: 'none' }}>
+                        Follow up →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {staleSubmissions.length > 5 && (
+              <div style={{ padding: '10px 24px', background: '#f9fafb', textAlign: 'center' }}>
+                <button onClick={() => navigate('/tracker')} style={{ fontSize: 12, color: '#6c63ff', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}>
+                  +{staleSubmissions.length - 5} more — view in Tracker
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Recent Consultants */}
       <div style={{ ...card, padding: 24 }}>
