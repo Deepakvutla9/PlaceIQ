@@ -1,8 +1,16 @@
 import { useEffect, useState, useRef } from 'react'
-import { Plus, Pencil, Trash2, X, Check, Users, FileText, Upload, Loader, Search, Download } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Check, Users, FileText, Upload, Loader, Search, Download, History } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { extractTextFromResume, parseResumeWithAI } from '../lib/resumeParser'
+
+const STATUS_COLORS_SUB = {
+  submitted:    { bg: '#dbeafe', color: '#1e40af' },
+  interviewing: { bg: '#ede9fe', color: '#5b21b6' },
+  offer:        { bg: '#fef3c7', color: '#92400e' },
+  placed:       { bg: '#d1fae5', color: '#065f46' },
+  rejected:     { bg: '#fee2e2', color: '#991b1b' },
+}
 
 const VISA_OPTIONS = ['H1B', 'OPT', 'CPT', 'Green Card', 'US Citizen', 'TN', 'L1']
 const STATUS_OPTIONS = ['bench', 'submitted', 'interviewing', 'placed', 'upcoming']
@@ -40,6 +48,9 @@ export default function Consultants() {
   const [uploadProgress, setUploadProgress] = useState('')
   const [parsing, setParsing] = useState(false)
   const fileInputRef = useRef()
+  const [activityConsultant, setActivityConsultant] = useState(null)
+  const [activityLog, setActivityLog] = useState([])
+  const [activityLoading, setActivityLoading] = useState(false)
 
   useEffect(() => { fetchConsultants() }, [])
   useEffect(() => {
@@ -136,6 +147,18 @@ export default function Consultants() {
     fetchConsultants()
   }
 
+  async function openActivity(c) {
+    setActivityConsultant(c)
+    setActivityLoading(true)
+    const { data } = await supabase
+      .from('submissions')
+      .select('*, vendors(company, email)')
+      .eq('consultant_id', c.id)
+      .order('submitted_at', { ascending: false })
+    setActivityLog(data || [])
+    setActivityLoading(false)
+  }
+
   function handleEdit(c) {
     setForm({ name: c.name, email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, rate: c.rate, experience: c.experience || '', status: c.status, notes: c.notes || '', available_from: c.available_from || '' })
     setEditing(c.id)
@@ -201,7 +224,11 @@ export default function Consultants() {
                         {c.name.slice(0, 2).toUpperCase()}
                       </div>
                       <div>
-                        <p style={{ fontWeight: 600, color: '#111827' }}>{c.name}</p>
+                        <p onClick={() => openActivity(c)} style={{ fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+                          onMouseOver={e => e.currentTarget.style.color = '#6c63ff'}
+                          onMouseOut={e => e.currentTarget.style.color = '#111827'}>
+                          {c.name}
+                        </p>
                         <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>{c.experience ? `${c.experience} yrs exp` : c.email || ''}</p>
                       </div>
                     </div>
@@ -233,6 +260,11 @@ export default function Consultants() {
                   </td>
                   <td style={{ padding: '14px 16px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => openActivity(c)} style={{ background: 'none', border: 'none', padding: '6px', borderRadius: 6, cursor: 'pointer', color: '#9ca3af', display: 'flex' }}
+                        onMouseOver={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.color = '#6c63ff' }}
+                        onMouseOut={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#9ca3af' }}>
+                        <History size={14} />
+                      </button>
                       <button onClick={() => handleEdit(c)} style={{ background: 'none', border: 'none', padding: '6px', borderRadius: 6, cursor: 'pointer', color: '#9ca3af', display: 'flex' }}
                         onMouseOver={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.color = '#6c63ff' }}
                         onMouseOut={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#9ca3af' }}>
@@ -249,6 +281,82 @@ export default function Consultants() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Activity Drawer */}
+      {activityConsultant && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', justifyContent: 'flex-end' }}>
+          <div onClick={() => setActivityConsultant(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(2px)' }} />
+          <div style={{ position: 'relative', width: 420, background: '#fff', height: '100%', boxShadow: '-8px 0 40px rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
+            {/* Drawer header */}
+            <div style={{ padding: '24px 24px 20px', borderBottom: '1px solid #f3f4f6' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 40, height: 40, background: '#ede9fe', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#6c63ff' }}>
+                    {activityConsultant.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <p style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>{activityConsultant.name}</p>
+                    <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>{activityConsultant.visa_status} · ${activityConsultant.rate}/hr · {activityConsultant.location}</p>
+                  </div>
+                </div>
+                <button onClick={() => setActivityConsultant(null)} style={{ background: '#f3f4f6', border: 'none', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#6b7280' }}>
+                  <X size={15} />
+                </button>
+              </div>
+              {/* Summary chips */}
+              {activityLog.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Total', count: activityLog.length, bg: '#f3f4f6', color: '#374151' },
+                    { label: 'Placed', count: activityLog.filter(s => s.status === 'placed').length, bg: '#d1fae5', color: '#065f46' },
+                    { label: 'Interviewing', count: activityLog.filter(s => s.status === 'interviewing').length, bg: '#ede9fe', color: '#5b21b6' },
+                    { label: 'Rejected', count: activityLog.filter(s => s.status === 'rejected').length, bg: '#fee2e2', color: '#991b1b' },
+                  ].filter(c => c.count > 0).map(({ label, count, bg, color }) => (
+                    <span key={label} style={{ background: bg, color, borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>{count} {label}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Drawer body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+              {activityLoading ? (
+                <div style={{ textAlign: 'center', paddingTop: 40 }}>
+                  <div style={{ width: 32, height: 32, border: '3px solid #ede9fe', borderTop: '3px solid #6c63ff', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading activity...</p>
+                </div>
+              ) : activityLog.length === 0 ? (
+                <div style={{ textAlign: 'center', paddingTop: 60 }}>
+                  <History size={32} color="#d1d5db" style={{ margin: '0 auto 12px' }} />
+                  <p style={{ fontWeight: 600, color: '#374151', fontSize: 14 }}>No submissions yet</p>
+                  <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>Use HotDesk to submit this consultant to vendors</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {activityLog.map(s => {
+                    const sc = STATUS_COLORS_SUB[s.status] || { bg: '#f3f4f6', color: '#374151' }
+                    const days = Math.floor((Date.now() - new Date(s.submitted_at).getTime()) / (1000 * 60 * 60 * 24))
+                    return (
+                      <div key={s.id} style={{ background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: 12, padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{s.job_title || 'Untitled Role'}</p>
+                          <span style={{ background: sc.bg, color: sc.color, borderRadius: 99, padding: '2px 9px', fontSize: 11, fontWeight: 700, textTransform: 'capitalize', flexShrink: 0, marginLeft: 8 }}>{s.status}</span>
+                        </div>
+                        <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>@ {s.vendors?.company || 'Unknown vendor'}</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <p style={{ fontSize: 11, color: '#9ca3af' }}>{new Date(s.submitted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af' }}>{days === 0 ? 'Today' : `${days}d ago`}</p>
+                        </div>
+                        {s.notes && <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8, paddingTop: 8, borderTop: '1px solid #f3f4f6' }}>{s.notes}</p>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -361,6 +469,7 @@ export default function Consultants() {
           </div>
         </div>
       )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }
