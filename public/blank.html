@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Auth</title></head>
+<body>
+<script src="https://unpkg.com/@azure/msal-browser@2.38.3/dist/msal-browser.min.js"></script>
+<script>
+  window.onload = function() {
+    const msalInstance = new msal.PublicClientApplication({
+      auth: {
+        clientId: 'f78a49df-0068-4dc2-807d-3ad58a4affa7',
+        authority: 'https://login.microsoftonline.com/common',
+        redirectUri: window.location.origin + '/blank.html',
+      },
+      cache: { cacheLocation: 'localStorage' }
+    })
+    msalInstance.initialize().then(() => msalInstance.handleRedirectPromise())
+  }
+</script>
+</body>
+</html>

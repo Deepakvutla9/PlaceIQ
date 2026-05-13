@@ -13,6 +13,9 @@ export function AuthProvider({ children }) {
       setLoading(false)
     })
 
+    // Handle email confirmation redirect
+    supabase.auth.exchangeCodeForSession(window.location.search).catch(() => {})
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
     })
