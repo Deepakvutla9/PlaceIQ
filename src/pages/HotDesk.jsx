@@ -291,16 +291,13 @@ ${SIGN_OFF}`
       const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
       setBody(`${aiBody}\n\n${submissionForms}\n\n${signature}`)
     } else if (emailType === 'hotlist') {
-      const cards = selectedConsultants.map((c, i) => [
-        `[${i + 1}] ${c.name}`,
-        `Skills      : ${c.skills || '—'}`,
-        `Experience  : ${c.experience ? `${c.experience} years` : '—'}`,
-        `Location    : ${c.location || '—'}`,
-        `Visa        : ${c.visa_status || '—'}`,
-        c.employment_type ? `Type        : ${c.employment_type}` : null,
-      ].filter(Boolean).join('\n')).join('\n\n')
-      const hotlist = `-- HOTLIST --\n\n${cards}\n\n-- END OF HOTLIST --`
-      setBody(`${aiBody}\n\n${hotlist}\n\n${signature}`)
+      const cards = selectedConsultants.map((c, i) => {
+        const role = c.skills?.split(',')[0]?.trim() || 'Consultant'
+        const exp = c.experience ? `${c.experience} Years` : '—'
+        const loc = c.location || '—'
+        return `${i + 1}. ${c.name} - ${role} - ${exp} - ${loc}`
+      }).join('\n')
+      setBody(`${aiBody}\n\n${cards}\n\n${signature}`)
     } else {
       setBody(`${aiBody}\n\n${signature}`)
     }
