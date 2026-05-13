@@ -264,7 +264,7 @@ General skill area: ${selectedConsultants.map(c => c.skills?.split(',')[0]).filt
 ${SIGN_OFF}`
 
     } else if (emailType === 'hotlist') {
-      prompt = `Write a short, professional bench sales recruiter hotlist email to vendors. Mention you are sharing a hotlist of ${selectedConsultants.length} available consultant${selectedConsultants.length > 1 ? 's' : ''} and invite them to reach out for any matching requirements. Keep it to 2-3 sentences — do not describe individual consultants in the body, the table is included separately.
+      prompt = `Write a short, professional bench sales recruiter hotlist email intro to vendors. Keep it to exactly 2-3 sentences. Do NOT include any table, list, or consultant details — just a brief intro saying you are sharing a hotlist of available consultants and inviting them to reach out for matching requirements. The table will be added separately after your response.
 
 ${jdContext}
 
@@ -291,10 +291,20 @@ ${SIGN_OFF}`
       const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
       setBody(`${aiBody}\n\n${submissionForms}\n\n${signature}`)
     } else if (emailType === 'hotlist') {
-      const hotlistRows = selectedConsultants.map((c, i) =>
-        `${i + 1}. ${c.name}\n   Skills: ${c.skills || '—'}\n   Experience: ${c.experience ? `${c.experience} years` : '—'}\n   Location: ${c.location || '—'}`
-      ).join('\n\n')
-      setBody(`${aiBody}\n\n${hotlistRows}\n\n${signature}`)
+      const cols = [
+        { label: 'Name',       w: 24, get: c => c.name },
+        { label: 'Skills',     w: 38, get: c => (c.skills || '').split(',').slice(0, 4).join(', ') },
+        { label: 'Experience', w: 12, get: c => c.experience ? `${c.experience} yrs` : '—' },
+        { label: 'Location',   w: 20, get: c => c.location || '—' },
+      ]
+      const pad = (s, w) => { const t = String(s || '').slice(0, w); return t + ' '.repeat(w - t.length) }
+      const divider = '+' + cols.map(col => '-'.repeat(col.w + 2)).join('+') + '+'
+      const headerRow = '|' + cols.map(col => ` ${pad(col.label, col.w)} `).join('|') + '|'
+      const dataRows = selectedConsultants.map(c =>
+        '|' + cols.map(col => ` ${pad(col.get(c), col.w)} `).join('|') + '|'
+      ).join('\n')
+      const table = `${divider}\n${headerRow}\n${divider}\n${dataRows}\n${divider}`
+      setBody(`${aiBody}\n\n${table}\n\n${signature}`)
     } else {
       setBody(`${aiBody}\n\n${signature}`)
     }
