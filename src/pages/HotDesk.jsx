@@ -244,7 +244,7 @@ Reference 2: ${c.reference2 || ''}
     setSendError('')
 
     const jdContext = jobReq ? `Job Role: ${jobReq.title || ''}\nRequired Skills: ${jobReq.skills?.join(', ') || ''}` : ''
-    const SIGN_OFF = 'Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Start with the greeting: "Hi {{VENDOR_NAME}}," on its own line — this placeholder will be replaced with the actual contact name per vendor. Sign off as "PlaceIQ Recruiting Team".'
+    const SIGN_OFF = 'Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Start with the greeting: "Hi {{VENDOR_NAME}}," on its own line — this placeholder will be replaced with the actual contact name per vendor. Do NOT include any sign-off or signature — end the body after the last sentence.'
 
     let prompt = ''
 
@@ -285,20 +285,18 @@ ${SIGN_OFF}`
     const bodyStart = lines.findIndex(l => l.startsWith('Subject:')) + 2
     const aiBody = lines.slice(bodyStart).join('\n').trim()
 
+    const signature = 'Best regards,\nPlaceIQ Recruiting Team'
+
     if (emailType === 'submission') {
       const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
-      setBody(`${aiBody}\n\n${submissionForms}`)
+      setBody(`${aiBody}\n\n${submissionForms}\n\n${signature}`)
     } else if (emailType === 'hotlist') {
-      const colW = [28, 36, 12, 20]
-      const pad = (s, w) => String(s || '').slice(0, w).padEnd(w)
-      const divider = colW.map(w => '-'.repeat(w)).join('-+-')
-      const header = `${pad('Name', colW[0])} | ${pad('Skills', colW[1])} | ${pad('Exp', colW[2])} | ${pad('Location', colW[3])}`
-      const rows = selectedConsultants.map(c =>
-        `${pad(c.name, colW[0])} | ${pad(c.skills, colW[1])} | ${pad(c.experience ? `${c.experience} yrs` : '-', colW[2])} | ${pad(c.location, colW[3])}`
-      ).join('\n')
-      setBody(`${aiBody}\n\n${header}\n${divider}\n${rows}`)
+      const hotlistRows = selectedConsultants.map((c, i) =>
+        `${i + 1}. ${c.name}\n   Skills: ${c.skills || '—'}\n   Experience: ${c.experience ? `${c.experience} years` : '—'}\n   Location: ${c.location || '—'}`
+      ).join('\n\n')
+      setBody(`${aiBody}\n\n${hotlistRows}\n\n${signature}`)
     } else {
-      setBody(aiBody)
+      setBody(`${aiBody}\n\n${signature}`)
     }
 
     setGenerating(false)
