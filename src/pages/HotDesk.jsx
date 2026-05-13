@@ -291,20 +291,16 @@ ${SIGN_OFF}`
       const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
       setBody(`${aiBody}\n\n${submissionForms}\n\n${signature}`)
     } else if (emailType === 'hotlist') {
-      const cols = [
-        { label: 'Name',       w: 24, get: c => c.name },
-        { label: 'Skills',     w: 38, get: c => (c.skills || '').split(',').slice(0, 4).join(', ') },
-        { label: 'Experience', w: 12, get: c => c.experience ? `${c.experience} yrs` : '—' },
-        { label: 'Location',   w: 20, get: c => c.location || '—' },
-      ]
-      const pad = (s, w) => { const t = String(s || '').slice(0, w); return t + ' '.repeat(w - t.length) }
-      const divider = '+' + cols.map(col => '-'.repeat(col.w + 2)).join('+') + '+'
-      const headerRow = '|' + cols.map(col => ` ${pad(col.label, col.w)} `).join('|') + '|'
-      const dataRows = selectedConsultants.map(c =>
-        '|' + cols.map(col => ` ${pad(col.get(c), col.w)} `).join('|') + '|'
-      ).join('\n')
-      const table = `${divider}\n${headerRow}\n${divider}\n${dataRows}\n${divider}`
-      setBody(`${aiBody}\n\n${table}\n\n${signature}`)
+      const cards = selectedConsultants.map((c, i) => [
+        `[${i + 1}] ${c.name}`,
+        `Skills      : ${c.skills || '—'}`,
+        `Experience  : ${c.experience ? `${c.experience} years` : '—'}`,
+        `Location    : ${c.location || '—'}`,
+        `Visa        : ${c.visa_status || '—'}`,
+        c.employment_type ? `Type        : ${c.employment_type}` : null,
+      ].filter(Boolean).join('\n')).join('\n\n')
+      const hotlist = `-- HOTLIST --\n\n${cards}\n\n-- END OF HOTLIST --`
+      setBody(`${aiBody}\n\n${hotlist}\n\n${signature}`)
     } else {
       setBody(`${aiBody}\n\n${signature}`)
     }
