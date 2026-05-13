@@ -54,6 +54,7 @@ export default function JobInbox() {
     },
     onError: () => setError('Gmail login failed.'),
     scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.compose',
+    prompt: 'select_account',
   })
 
   async function connectOutlook() {
