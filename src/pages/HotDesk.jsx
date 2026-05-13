@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { extractJobRequirements, matchConsultants, chat } from '../lib/groq'
-import { signInMicrosoft } from '../lib/microsoft'
+import { signInMicrosoft, getValidOutlookToken } from '../lib/microsoft'
 
 const card = { background: '#fff', borderRadius: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' }
 
@@ -219,6 +219,9 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
         if (result.error) { setSendError('Send failed: ' + result.error.message); setSending(false); return }
       } else {
         if (!outlookToken) { setSendError('Outlook not connected. Go to Job Inbox to connect.'); setSending(false); return }
+        const freshToken = await getValidOutlookToken()
+        if (!freshToken) { localStorage.removeItem('outlook_token'); setOutlookToken(''); setSendError('Outlook session expired. Click Reconnect Outlook.'); setSending(false); return }
+        if (freshToken !== outlookToken) { setOutlookToken(freshToken) }
         const outlookAttachments = attachments.map(a => ({
           '@odata.type': '#microsoft.graph.fileAttachment',
           name: a.name,
@@ -227,7 +230,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
         }))
         const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${outlookToken}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: {
               subject,
@@ -249,6 +252,18 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
           setSendError(errMsg); setSending(false); return
         }
       }
+      // Auto-log each consultant submission to Tracker
+      const jobTitle = jobReq?.title || subject || 'Untitled Role'
+      for (const c of selectedConsultants) {
+        await supabase.from('submissions').insert({
+          consultant_id: c.id,
+          vendor_id: selectedVendor.id,
+          job_title: jobTitle,
+          status: 'submitted',
+          submitted_at: new Date().toISOString(),
+        })
+      }
+
       setSent(true)
       setTimeout(() => setSent(false), 4000)
       setBody('')
@@ -308,7 +323,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
 
       {sent && (
         <div style={{ background: '#d1fae5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '13px 18px', color: '#065f46', fontSize: 13, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <CheckCircle size={16} /> Email sent successfully via {sendVia === 'gmail' ? 'Gmail' : 'Outlook'}!
+          <CheckCircle size={16} /> Email sent via {sendVia === 'gmail' ? 'Gmail' : 'Outlook'} — {selectedConsultants.length > 0 ? `${selectedConsultants.length} submission${selectedConsultants.length > 1 ? 's' : ''} logged in Tracker` : 'logged in Tracker'}
         </div>
       )}
 

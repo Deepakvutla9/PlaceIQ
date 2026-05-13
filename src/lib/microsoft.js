@@ -37,7 +37,6 @@ export async function signInMicrosoft() {
         if (popup.closed) { clearInterval(timer); reject(new Error('Popup closed')); return }
         const hash = popup.location.hash
         const search = popup.location.search
-        console.log('[MS Auth] hash:', hash, 'search:', search)
 
         const params = new URLSearchParams((hash || search).replace(/^[#?]/, ''))
         const code = params.get('code')
@@ -77,9 +76,61 @@ async function exchangeCode(code, verifier) {
     }),
   })
   const data = await res.json()
-  console.log('[MS Auth] token response:', data)
   if (data.error) throw new Error(data.error_description || data.error)
+  // Store refresh token and expiry
+  if (data.refresh_token) localStorage.setItem('outlook_refresh_token', data.refresh_token)
+  if (data.expires_in) {
+    const expiresAt = Date.now() + (data.expires_in - 60) * 1000 // 1 min buffer
+    localStorage.setItem('outlook_token_expires_at', String(expiresAt))
+  }
   return { accessToken: data.access_token, account: data.id_token || 'outlook_user' }
+}
+
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('outlook_refresh_token')
+  if (!refreshToken) throw new Error('No refresh token')
+
+  const res = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: SCOPES,
+    }),
+  })
+  const data = await res.json()
+  if (data.error) throw new Error(data.error_description || data.error)
+
+  localStorage.setItem('outlook_token', data.access_token)
+  if (data.refresh_token) localStorage.setItem('outlook_refresh_token', data.refresh_token)
+  if (data.expires_in) {
+    const expiresAt = Date.now() + (data.expires_in - 60) * 1000
+    localStorage.setItem('outlook_token_expires_at', String(expiresAt))
+  }
+  return data.access_token
+}
+
+// Call this instead of reading localStorage directly — auto-refreshes if expired
+export async function getValidOutlookToken() {
+  const expiresAt = Number(localStorage.getItem('outlook_token_expires_at') || 0)
+  const token = localStorage.getItem('outlook_token')
+  if (!token) return null
+
+  // Refresh proactively if within 1 minute of expiry
+  if (expiresAt && Date.now() >= expiresAt) {
+    try {
+      return await refreshAccessToken()
+    } catch {
+      // Refresh failed — clear tokens so UI shows reconnect
+      localStorage.removeItem('outlook_token')
+      localStorage.removeItem('outlook_refresh_token')
+      localStorage.removeItem('outlook_token_expires_at')
+      return null
+    }
+  }
+  return token
 }
 
 export function getMicrosoftToken() {
@@ -93,6 +144,8 @@ export function getMicrosoftAccount() {
 export function signOutMicrosoft() {
   localStorage.removeItem('outlook_token')
   localStorage.removeItem('outlook_account')
+  localStorage.removeItem('outlook_refresh_token')
+  localStorage.removeItem('outlook_token_expires_at')
 }
 
 export async function fetchOutlookEmails(token) {
