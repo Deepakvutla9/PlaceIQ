@@ -375,7 +375,17 @@ ${SIGN_OFF}`
         if (sendVia === 'gmail') {
           if (!gmailToken) { results.push({ vendor, ok: false, error: 'Gmail not connected' }); continue }
           const r = await sendGmailEmail(gmailToken, vendor.email, subject, personalizedBody, attachments)
-          if (r.error) { results.push({ vendor, ok: false, error: r.error.message }); continue }
+          if (r.error) {
+            const isAuthError = r.error.code === 401 || r.error.status === 'UNAUTHENTICATED'
+            if (isAuthError) {
+              localStorage.removeItem('gmail_token')
+              setSendError('Gmail session expired. Go to Job Inbox to reconnect Gmail.')
+              setSending(false)
+              setSendResults([])
+              return
+            }
+            results.push({ vendor, ok: false, error: r.error.message }); continue
+          }
         } else {
           const outlookAttachments = attachments.map(a => ({
             '@odata.type': '#microsoft.graph.fileAttachment',
@@ -796,8 +806,9 @@ ${SIGN_OFF}`
             </div>
 
             {sendVia === 'gmail' && !gmailConnected && (
-              <div style={{ margin: '16px 20px 0', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', color: '#92400e', fontSize: 13 }}>
-                Gmail not connected. Go to <a href="/inbox" style={{ color: '#6c63ff', fontWeight: 600 }}>Job Inbox</a> to connect.
+              <div style={{ margin: '16px 20px 0', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span>Gmail not connected or session expired.</span>
+                <a href="/inbox" style={{ background: '#f59e0b', color: '#fff', padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, textDecoration: 'none', flexShrink: 0 }}>Reconnect Gmail →</a>
               </div>
             )}
             {sendVia === 'outlook' && !outlookConnected && (
