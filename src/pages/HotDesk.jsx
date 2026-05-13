@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw, BookOpen, Save, Trash2 } from 'lucide-react'
+import { Zap, ChevronDown, ChevronUp, Send, Loader, Sparkles, Users, Building2, CheckCircle, Mail, ArrowRight, RefreshCw, BookOpen, Save, Trash2, Paperclip, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { extractJobRequirements, matchConsultants, chat } from '../lib/groq'
 import { signInMicrosoft, getValidOutlookToken } from '../lib/microsoft'
@@ -100,11 +100,16 @@ export default function HotDesk() {
   const [selectedVendors, setSelectedVendors] = useState([])
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [submissionType, setSubmissionType] = useState('C2C')
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendProgress, setSendProgress] = useState('')
   const [sendResults, setSendResults] = useState([])
   const [sendError, setSendError] = useState('')
+
+  // Extra file attachments
+  const [extraFiles, setExtraFiles] = useState([])
+  const fileInputRef = useRef()
 
   // Templates
   const [templates, setTemplates] = useState([])
@@ -160,6 +165,29 @@ export default function HotDesk() {
     setTemplates(prev => prev.filter(t => t.id !== id))
   }
 
+  function submissionBlock(c) {
+    return `
+——————————————————————————————
+SUBMISSION FORMAT — ${c.name}
+——————————————————————————————
+Full Legal Name as on Passport: ${c.legal_name || c.name || ''}
+Email: ${c.email || ''}
+Contact: ${c.phone || ''}
+Current Location: ${c.location || ''}
+Open to Relocate: ${c.open_to_relocate || ''}
+Available to Start: ${c.available_from || ''}
+Last Four Digits of SSN: ${c.ssn_last4 || ''}
+Interview Available Timings: ${c.interview_timings || ''}
+Rate: ${c.rate ? `$${c.rate}/hr` : ''}
+DOB (MM/DD): ${c.dob || ''}
+LinkedIn URL: ${c.linkedin_url || ''}
+
+References:
+Reference 1: ${c.reference1 || ''}
+Reference 2: ${c.reference2 || ''}
+——————————————————————————————`.trim()
+  }
+
   async function handleMatch() {
     if (!jdText.trim()) return
     setMatching(true)
@@ -212,24 +240,33 @@ export default function HotDesk() {
     setGenerating(true)
     setSendError('')
     const profiles = selectedConsultants.map(c =>
-      `• ${c.name} | ${c.visa_status} | ${c.location} | $${c.rate}/hr | ${c.experience} yrs exp | Skills: ${c.skills}`
+      `• ${c.name} | ${c.visa_status} | ${c.employment_type || ''} | ${c.location} | $${c.rate}/hr | ${c.experience} yrs exp | Skills: ${c.skills}`
     ).join('\n')
+
+    const employmentNote = submissionType === 'C2C'
+      ? 'This is a C2C (Corp to Corp) submission. Mention that the consultant is available for C2C engagements.'
+      : submissionType === 'W2'
+      ? 'This is a W2 submission. Mention that the consultant is open for W2 positions.'
+      : 'This is a Fulltime submission. Mention that the consultant is open for fulltime/permanent roles.'
     const jdContext = jobReq ? `Job Role: ${jobReq.title || ''}\nRequired Skills: ${jobReq.skills?.join(', ') || ''}` : ''
-    const prompt = `Write a professional bench sales recruiter email to send to vendors/primes with the following consultant profiles available for immediate placement. Keep it concise, professional, and highlight the key skills.
+    const prompt = `Write a short, professional bench sales recruiter email to send to vendors/primes introducing available consultants. The email should be a brief, compelling intro — do NOT list individual consultant details like rate, location, visa status, or skills in the body. Those details will be provided separately in a submission format below the email. Just write a warm, professional 2-3 sentence intro that mentions the number of consultants and the general role/skill area, and invites the vendor to review the profiles.
 
 ${jdContext}
+${employmentNote}
 
-Consultant Profiles:
-${profiles}
+Consultant count: ${selectedConsultants.length}
+General skill area: ${selectedConsultants.map(c => c.skills?.split(',')[0]).filter(Boolean).join(', ')}
 
-Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Do not address a specific vendor by name. Sign off as "PlaceIQ Recruiting Team".`
+Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Start with the greeting: "Hi {{VENDOR_NAME}}," on its own line — this placeholder will be replaced with the actual contact name per vendor. Sign off as "PlaceIQ Recruiting Team".`
 
     const result = await chat(prompt)
     const lines = result.split('\n')
     const subjectLine = lines.find(l => l.startsWith('Subject:'))
     if (subjectLine) setSubject(subjectLine.replace('Subject:', '').trim())
     const bodyStart = lines.findIndex(l => l.startsWith('Subject:')) + 2
-    setBody(lines.slice(bodyStart).join('\n').trim())
+    const aiBody = lines.slice(bodyStart).join('\n').trim()
+    const submissionForms = selectedConsultants.map(c => submissionBlock(c)).join('\n\n')
+    setBody(`${aiBody}\n\n${submissionForms}`)
     setGenerating(false)
   }
 
@@ -252,6 +289,18 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
           attachments.push({ name, data, mimeType })
         } catch { /* skip */ }
       }
+    }
+    // Add extra user-picked files
+    for (const file of extraFiles) {
+      try {
+        const data = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result.split(',')[1])
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+        attachments.push({ name: file.name, data, mimeType: file.type || 'application/octet-stream' })
+      } catch { /* skip */ }
     }
 
     let freshToken = null
@@ -279,9 +328,12 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
       }
 
       try {
+        const vendorName = vendor.contact_name?.trim() || 'Team'
+        const personalizedBody = body.replace('{{VENDOR_NAME}}', vendorName)
+
         if (sendVia === 'gmail') {
           if (!gmailToken) { results.push({ vendor, ok: false, error: 'Gmail not connected' }); continue }
-          const r = await sendGmailEmail(gmailToken, vendor.email, subject, body, attachments)
+          const r = await sendGmailEmail(gmailToken, vendor.email, subject, personalizedBody, attachments)
           if (r.error) { results.push({ vendor, ok: false, error: r.error.message }); continue }
         } else {
           const outlookAttachments = attachments.map(a => ({
@@ -294,7 +346,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
             body: JSON.stringify({
               message: {
                 subject,
-                body: { contentType: 'Text', content: body },
+                body: { contentType: 'Text', content: personalizedBody },
                 toRecipients: [{ emailAddress: { address: vendor.email } }],
                 attachments: outlookAttachments,
               }
@@ -506,8 +558,8 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                           <div style={{ width: 30, height: 30, background: i === 0 ? '#fef3c7' : '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: i === 0 ? '#92400e' : '#6b7280', flexShrink: 0 }}>
                             #{i + 1}
                           </div>
-                          <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setExpanded(expanded === i ? null : i)}>
-                            <p style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{m.consultant.name}</p>
+                          <div style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden' }} onClick={() => setExpanded(expanded === i ? null : i)}>
+                            <p style={{ fontWeight: 700, fontSize: 14, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.consultant.name}</p>
                             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {m.consultant.visa_status} · {m.consultant.location} · ${m.consultant.rate}/hr
                             </p>
@@ -525,7 +577,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                             <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, background: '#f9fafb', borderRadius: 8, padding: '12px 14px', marginBottom: 14 }}>{m.reason}</p>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
                               {[['Skills', m.consultant.skills], ['Experience', m.consultant.experience ? `${m.consultant.experience} years` : '—'], ['Email', m.consultant.email || '—']].map(([label, val]) => (
-                                <div key={label} style={{ background: '#f9fafb', borderRadius: 8, padding: '10px 12px' }}>
+                                <div key={label} style={{ background: '#f9fafb', borderRadius: 8, padding: '10px 12px', minWidth: 0 }}>
                                   <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</p>
                                   <p style={{ fontSize: 12, color: '#374151', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</p>
                                 </div>
@@ -575,7 +627,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{m.consultant.name}</p>
-                        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{m.consultant.visa_status} · ${m.consultant.rate}/hr</p>
+                        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{m.consultant.visa_status}{m.consultant.employment_type ? ` · ${m.consultant.employment_type}` : ''} · ${m.consultant.rate}/hr</p>
                       </div>
                       <ScoreBadge score={m.score} />
                     </div>
@@ -629,6 +681,19 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
               </div>
             </div>
 
+            {/* Submission type selector */}
+            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Submission Type</p>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['C2C', 'W2', 'Fulltime'].map(type => (
+                  <button key={type} onClick={() => setSubmissionType(type)}
+                    style={{ flex: 1, padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 8, border: `1.5px solid ${submissionType === type ? '#6c63ff' : '#e5e7eb'}`, background: submissionType === type ? '#6c63ff' : '#fff', color: submissionType === type ? '#fff' : '#6b7280', cursor: 'pointer', transition: 'all 0.15s' }}>
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button onClick={generateEmail} disabled={generating || !selectedConsultants.length}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: generating || !selectedConsultants.length ? '#a5b4fc' : '#6c63ff', color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, cursor: generating || !selectedConsultants.length ? 'not-allowed' : 'pointer' }}>
               {generating ? <><Loader size={15} style={{ animation: 'spin 1s linear infinite' }} /> Generating...</> : <><Sparkles size={14} /> Generate Email with AI</>}
@@ -654,9 +719,9 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                   <Mail size={13} />
                   via <strong style={{ color: sendVia === 'gmail' ? '#ea4335' : '#0078d4' }}>{sendVia === 'gmail' ? 'Gmail' : 'Outlook'}</strong>
                 </div>
-                {selectedConsultants.filter(c => c.resume_url).length > 0 && (
+                {(selectedConsultants.filter(c => c.resume_url).length > 0 || extraFiles.length > 0) && (
                   <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>
-                    📎 {selectedConsultants.filter(c => c.resume_url).length} resume{selectedConsultants.filter(c => c.resume_url).length > 1 ? 's' : ''} will be attached
+                    📎 {selectedConsultants.filter(c => c.resume_url).length + extraFiles.length} file{selectedConsultants.filter(c => c.resume_url).length + extraFiles.length > 1 ? 's' : ''} will be attached
                   </span>
                 )}
               </div>
@@ -728,6 +793,35 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                 <textarea value={body} onChange={e => setBody(e.target.value)} rows={16}
                   placeholder="Select consultants and click 'Generate Email with AI' to auto-draft, or type manually..."
                   style={{ resize: 'none', lineHeight: 1.7, fontSize: 13, width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 9, padding: '10px 12px', color: '#374151', boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Extra file attachments */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: extraFiles.length > 0 ? 8 : 0 }}>
+                  <button onClick={() => fileInputRef.current?.click()}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                    <Paperclip size={13} /> Attach Files
+                  </button>
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>Cover letter, ID, or any document</span>
+                  <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }}
+                    onChange={e => setExtraFiles(prev => [...prev, ...Array.from(e.target.files)])} />
+                </div>
+                {extraFiles.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {extraFiles.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f5f3ff', border: '1px solid #ede9fe', borderRadius: 7, padding: '4px 10px' }}>
+                        <Paperclip size={11} color="#6c63ff" />
+                        <span style={{ fontSize: 12, color: '#374151', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                        <button onClick={() => setExtraFiles(prev => prev.filter((_, j) => j !== i))}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 0, display: 'flex', alignItems: 'center' }}
+                          onMouseOver={e => e.currentTarget.style.color = '#ef4444'}
+                          onMouseOut={e => e.currentTarget.style.color = '#9ca3af'}>
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {sendError && <p style={{ fontSize: 13, color: '#ef4444', background: '#fef2f2', padding: '10px 14px', borderRadius: 8, border: '1px solid #fecaca' }}>{sendError}</p>}

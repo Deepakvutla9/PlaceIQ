@@ -22,7 +22,7 @@ const STATUS_STYLE = {
   upcoming:    { bg: '#f3f4f6', color: '#374151' },
 }
 
-const EMPTY_FORM = { name: '', email: '', phone: '', skills: '', visa_status: 'H1B', location: '', rate: '', experience: '', status: 'bench', notes: '', available_from: '' }
+const EMPTY_FORM = { name: '', legal_name: '', email: '', phone: '', skills: '', visa_status: 'H1B', location: '', open_to_relocate: '', rate: '', experience: '', status: 'bench', employment_type: '', notes: '', available_from: '', ssn_last4: '', interview_timings: '', dob: '', linkedin_url: '', reference1: '', reference2: '' }
 
 function Field({ label, children }) {
   return (
@@ -160,7 +160,7 @@ export default function Consultants() {
   }
 
   function handleEdit(c) {
-    setForm({ name: c.name, email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, rate: c.rate, experience: c.experience || '', status: c.status, notes: c.notes || '', available_from: c.available_from || '' })
+    setForm({ name: c.name, legal_name: c.legal_name || '', email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, open_to_relocate: c.open_to_relocate || '', rate: c.rate, experience: c.experience || '', status: c.status, employment_type: c.employment_type || '', notes: c.notes || '', available_from: c.available_from || '', ssn_last4: c.ssn_last4 || '', interview_timings: c.interview_timings || '', dob: c.dob || '', linkedin_url: c.linkedin_url || '', reference1: c.reference1 || '', reference2: c.reference2 || '' })
     setEditing(c.id)
     setResumeFile(null)
     setShowForm(true)
@@ -436,6 +436,15 @@ export default function Consultants() {
                     {VISA_OPTIONS.map(v => <option key={v}>{v}</option>)}
                   </select>
                 </Field>
+                <Field label="Employment Type">
+                  <select value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}>
+                    <option value="">Select...</option>
+                    <option value="C2C">C2C (Corp to Corp)</option>
+                    <option value="W2">W2</option>
+                    <option value="Fulltime">Fulltime</option>
+                    <option value="W2/Fulltime">W2 / Fulltime</option>
+                  </select>
+                </Field>
                 <Field label="Status">
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
                     {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
@@ -451,6 +460,48 @@ export default function Consultants() {
                     <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Any additional info..." style={{ resize: 'none' }} />
                   </Field>
                 </div>
+              </div>
+
+              {/* Submission Details */}
+              <div style={{ margin: '20px 0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ flex: 1, height: 1, background: '#f3f4f6' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>Submission Details</span>
+                <div style={{ flex: 1, height: 1, background: '#f3f4f6' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Field label="Full Legal Name (as on Passport)">
+                    <input value={form.legal_name} onChange={e => setForm(f => ({ ...f, legal_name: e.target.value }))} placeholder="Same as above if identical" />
+                  </Field>
+                </div>
+                <Field label="Open to Relocate">
+                  <select value={form.open_to_relocate} onChange={e => setForm(f => ({ ...f, open_to_relocate: e.target.value }))}>
+                    <option value="">Select...</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                    <option value="Open to discussion">Open to discussion</option>
+                  </select>
+                </Field>
+                <Field label="SSN Last 4 Digits">
+                  <input value={form.ssn_last4} onChange={e => setForm(f => ({ ...f, ssn_last4: e.target.value }))} placeholder="XXXX" maxLength={4} />
+                </Field>
+                <Field label="Date of Birth (MM/DD)">
+                  <input value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} placeholder="MM/DD" />
+                </Field>
+                <Field label="LinkedIn URL">
+                  <input value={form.linkedin_url} onChange={e => setForm(f => ({ ...f, linkedin_url: e.target.value }))} placeholder="https://linkedin.com/in/..." />
+                </Field>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Field label="Interview Available Timings">
+                    <input value={form.interview_timings} onChange={e => setForm(f => ({ ...f, interview_timings: e.target.value }))} placeholder="e.g. Mon–Fri 9am–5pm EST" />
+                  </Field>
+                </div>
+                <Field label="Reference 1">
+                  <input value={form.reference1} onChange={e => setForm(f => ({ ...f, reference1: e.target.value }))} placeholder="Name, Company, Phone" />
+                </Field>
+                <Field label="Reference 2">
+                  <input value={form.reference2} onChange={e => setForm(f => ({ ...f, reference2: e.target.value }))} placeholder="Name, Company, Phone" />
+                </Field>
               </div>
               {uploadProgress && <p style={{ fontSize: 12, color: '#6c63ff', marginTop: 12 }}>{uploadProgress}</p>}
               {saveError && <p style={{ fontSize: 13, color: '#ef4444', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginTop: 12 }}>{saveError}</p>}
