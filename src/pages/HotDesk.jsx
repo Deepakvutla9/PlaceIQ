@@ -313,9 +313,9 @@ ${SIGN_OFF}`
     setSendError('')
     setSendResults([])
 
-    // Build attachments once (shared across all vendors)
+    // Build attachments once (shared across all vendors) — skip for cold emails
     const attachments = []
-    for (const c of selectedConsultants) {
+    for (const c of emailType === 'cold' ? [] : selectedConsultants) {
       if (c.resume_url) {
         try {
           const data = await fetchFileAsBase64(c.resume_url)
@@ -756,8 +756,8 @@ ${SIGN_OFF}`
               )}
             </div>
 
-            <button onClick={generateEmail} disabled={generating || !selectedConsultants.length}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: generating || !selectedConsultants.length ? '#a5b4fc' : '#6c63ff', color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, cursor: generating || !selectedConsultants.length ? 'not-allowed' : 'pointer' }}>
+            <button onClick={generateEmail} disabled={generating || (emailType !== 'cold' && !selectedConsultants.length)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: generating || (emailType !== 'cold' && !selectedConsultants.length) ? '#a5b4fc' : '#6c63ff', color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, cursor: generating || (emailType !== 'cold' && !selectedConsultants.length) ? 'not-allowed' : 'pointer' }}>
               {generating ? <><Loader size={15} style={{ animation: 'spin 1s linear infinite' }} /> Generating...</> : <><Sparkles size={14} /> Generate Email with AI</>}
             </button>
 
