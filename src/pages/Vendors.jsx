@@ -108,6 +108,7 @@ export default function Vendors() {
   const { user } = useAuth()
   const [vendors, setVendors] = useState([])
   const [filtered, setFiltered] = useState([])
+  const [vendorStats, setVendorStats] = useState({}) // { vendor_id: { total, placed } }
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -118,7 +119,7 @@ export default function Vendors() {
   const [importResults, setImportResults] = useState(null)
   const [selectedImports, setSelectedImports] = useState([])
 
-  useEffect(() => { fetchVendors() }, [])
+  useEffect(() => { fetchVendors(); fetchStats() }, [])
   useEffect(() => {
     const q = search.toLowerCase()
     setFiltered(vendors.filter(v =>
@@ -134,6 +135,18 @@ export default function Vendors() {
     if (error) { setFetchError(error.message); return }
     setVendors(data || [])
     setFiltered(data || [])
+  }
+
+  async function fetchStats() {
+    const { data } = await supabase.from('submissions').select('vendor_id, status')
+    if (!data) return
+    const stats = {}
+    data.forEach(s => {
+      if (!stats[s.vendor_id]) stats[s.vendor_id] = { total: 0, placed: 0 }
+      stats[s.vendor_id].total++
+      if (s.status === 'placed') stats[s.vendor_id].placed++
+    })
+    setVendorStats(stats)
   }
 
   async function handleSave() {
@@ -294,8 +307,8 @@ export default function Vendors() {
       {/* Vendor Table */}
       <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 2fr 2fr 2fr 80px', padding: '12px 20px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-          {['Company', 'Name', 'Role', 'Email', 'Contact', ''].map(h => (
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 2fr 2fr 1.5fr 1.5fr 80px', padding: '12px 20px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+          {['Company', 'Name', 'Role', 'Email', 'Contact', 'Placement Rate', ''].map(h => (
             <span key={h} style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
           ))}
         </div>
@@ -310,7 +323,7 @@ export default function Vendors() {
           </div>
         ) : filtered.map((v, i) => (
           <div key={v.id}
-            style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 2fr 2fr 2fr 80px', padding: '14px 20px', borderBottom: i < filtered.length - 1 ? '1px solid #f3f4f6' : 'none', alignItems: 'center', transition: 'background 0.1s' }}
+            style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 2fr 2fr 1.5fr 1.5fr 80px', padding: '14px 20px', borderBottom: i < filtered.length - 1 ? '1px solid #f3f4f6' : 'none', alignItems: 'center', transition: 'background 0.1s' }}
             onMouseOver={e => e.currentTarget.style.background = '#fafafa'}
             onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
 
@@ -349,6 +362,29 @@ export default function Vendors() {
             {/* Contact/Phone */}
             <div>
               <p style={{ fontSize: 13, color: '#374151' }}>{v.phone || '—'}</p>
+            </div>
+
+            {/* Placement Rate */}
+            <div>
+              {(() => {
+                const s = vendorStats[v.id]
+                if (!s || s.total === 0) return <span style={{ fontSize: 12, color: '#d1d5db' }}>No data</span>
+                const rate = Math.round((s.placed / s.total) * 100)
+                const color = rate >= 50 ? '#065f46' : rate >= 20 ? '#92400e' : '#991b1b'
+                const bg = rate >= 50 ? '#d1fae5' : rate >= 20 ? '#fef3c7' : '#fee2e2'
+                const barColor = rate >= 50 ? '#10b981' : rate >= 20 ? '#f59e0b' : '#ef4444'
+                return (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ background: bg, color, borderRadius: 99, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{rate}%</span>
+                      <span style={{ fontSize: 11, color: '#9ca3af' }}>{s.placed}/{s.total}</span>
+                    </div>
+                    <div style={{ height: 3, background: '#f3f4f6', borderRadius: 99, overflow: 'hidden', width: 80 }}>
+                      <div style={{ height: '100%', width: `${rate}%`, background: barColor, borderRadius: 99 }} />
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Actions */}
