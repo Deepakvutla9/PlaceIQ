@@ -34,7 +34,6 @@ async function fetchFileAsBase64(url) {
 function getFileName(url, consultantName) {
   if (!url) return `${consultantName || 'Resume'}_Resume.pdf`
   const raw = decodeURIComponent(url.split('/').pop()) || ''
-  // Extract just the "Name_Resume.ext" portion after the consultantId prefix
   const match = raw.match(/_(.+_Resume\.\w+)$/)
   if (match) return match[1]
   return `${(consultantName || 'Resume').replace(/\s+/g, '_')}_Resume.pdf`
@@ -75,7 +74,6 @@ async function sendGmailEmail(token, to, subject, body, attachments = []) {
 }
 
 export default function HotDesk() {
-  // Step: 'match' | 'send'
   const [step, setStep] = useState('match')
 
   // Step 1 — Match
@@ -97,12 +95,13 @@ export default function HotDesk() {
   const [reconnecting, setReconnecting] = useState(false)
   const [vendors, setVendors] = useState([])
   const [selectedConsultants, setSelectedConsultants] = useState([])
-  const [selectedVendor, setSelectedVendor] = useState(null)
+  const [selectedVendors, setSelectedVendors] = useState([])
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState(false)
+  const [sendProgress, setSendProgress] = useState('')   // e.g. "Sending 2 / 5..."
+  const [sendResults, setSendResults] = useState([])     // [{ vendor, ok, error }]
   const [sendError, setSendError] = useState('')
 
   const gmailConnected = !!gmailToken
@@ -159,12 +158,20 @@ export default function HotDesk() {
     )
   }
 
+  function toggleVendor(v) {
+    setSelectedVendors(prev =>
+      prev.find(x => x.id === v.id) ? prev.filter(x => x.id !== v.id) : [...prev, v]
+    )
+  }
+
   function goToSend() {
     setStep('send')
     setSendError('')
+    setSendResults([])
+    setSendProgress('')
     setSubject('')
     setBody('')
-    setSelectedVendor(null)
+    setSelectedVendors([])
   }
 
   async function generateEmail() {
@@ -174,17 +181,15 @@ export default function HotDesk() {
     const profiles = selectedConsultants.map(c =>
       `• ${c.name} | ${c.visa_status} | ${c.location} | $${c.rate}/hr | ${c.experience} yrs exp | Skills: ${c.skills}`
     ).join('\n')
-    const vendorInfo = selectedVendor ? `Vendor: ${selectedVendor.company}${selectedVendor.contact_name ? `, Contact: ${selectedVendor.contact_name}` : ''}` : ''
     const jdContext = jobReq ? `Job Role: ${jobReq.title || ''}\nRequired Skills: ${jobReq.skills?.join(', ') || ''}` : ''
-    const prompt = `Write a professional bench sales recruiter email to send to a vendor/prime with the following consultant profiles available for immediate placement. Keep it concise, professional, and highlight the key skills.
+    const prompt = `Write a professional bench sales recruiter email to send to vendors/primes with the following consultant profiles available for immediate placement. Keep it concise, professional, and highlight the key skills.
 
 ${jdContext}
-${vendorInfo}
 
 Consultant Profiles:
 ${profiles}
 
-Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Sign off as "PlaceIQ Recruiting Team".`
+Write subject line on first line starting with "Subject: ", then leave a blank line, then write the email body. Do not address a specific vendor by name. Sign off as "PlaceIQ Recruiting Team".`
 
     const result = await chat(prompt)
     const lines = result.split('\n')
@@ -195,87 +200,116 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
     setGenerating(false)
   }
 
-  async function handleSend() {
-    if (!selectedVendor?.email) { setSendError('Selected vendor has no email address.'); return }
+  async function handleBulkSend() {
+    if (!selectedVendors.length) { setSendError('Select at least one vendor.'); return }
     if (!subject || !body) { setSendError('Subject and body are required.'); return }
+
     setSending(true)
     setSendError('')
-    try {
-      const attachments = []
-      for (const c of selectedConsultants) {
-        if (c.resume_url) {
-          try {
-            const data = await fetchFileAsBase64(c.resume_url)
-            const name = getFileName(c.resume_url, c.name)
-            const mimeType = name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            attachments.push({ name, data, mimeType })
-          } catch { /* skip */ }
-        }
+    setSendResults([])
+
+    // Build attachments once (shared across all vendors)
+    const attachments = []
+    for (const c of selectedConsultants) {
+      if (c.resume_url) {
+        try {
+          const data = await fetchFileAsBase64(c.resume_url)
+          const name = getFileName(c.resume_url, c.name)
+          const mimeType = name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          attachments.push({ name, data, mimeType })
+        } catch { /* skip */ }
+      }
+    }
+
+    let freshToken = null
+    if (sendVia === 'outlook') {
+      freshToken = await getValidOutlookToken()
+      if (!freshToken) {
+        localStorage.removeItem('outlook_token')
+        setOutlookToken('')
+        setSendError('Outlook session expired. Click Reconnect Outlook.')
+        setSending(false); return
+      }
+      if (freshToken !== outlookToken) setOutlookToken(freshToken)
+    }
+
+    const results = []
+    const jobTitle = jobReq?.title || subject || 'Untitled Role'
+
+    for (let i = 0; i < selectedVendors.length; i++) {
+      const vendor = selectedVendors[i]
+      setSendProgress(`Sending ${i + 1} / ${selectedVendors.length} — ${vendor.company}...`)
+
+      if (!vendor.email) {
+        results.push({ vendor, ok: false, error: 'No email address' })
+        continue
       }
 
-      if (sendVia === 'gmail') {
-        if (!gmailToken) { setSendError('Gmail not connected. Go to Job Inbox to connect.'); setSending(false); return }
-        const result = await sendGmailEmail(gmailToken, selectedVendor.email, subject, body, attachments)
-        if (result.error) { setSendError('Send failed: ' + result.error.message); setSending(false); return }
-      } else {
-        if (!outlookToken) { setSendError('Outlook not connected. Go to Job Inbox to connect.'); setSending(false); return }
-        const freshToken = await getValidOutlookToken()
-        if (!freshToken) { localStorage.removeItem('outlook_token'); setOutlookToken(''); setSendError('Outlook session expired. Click Reconnect Outlook.'); setSending(false); return }
-        if (freshToken !== outlookToken) { setOutlookToken(freshToken) }
-        const outlookAttachments = attachments.map(a => ({
-          '@odata.type': '#microsoft.graph.fileAttachment',
-          name: a.name,
-          contentType: a.mimeType,
-          contentBytes: a.data,
-        }))
-        const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: {
-              subject,
-              body: { contentType: 'Text', content: body },
-              toRecipients: [{ emailAddress: { address: selectedVendor.email } }],
-              attachments: outlookAttachments,
-            }
-          }),
-        })
-        if (res.status === 401) {
-          localStorage.removeItem('outlook_token')
-          setOutlookToken('')
-          setSendError('Outlook token expired. Click "Reconnect Outlook" below to sign in again.')
-          setSending(false); return
+      try {
+        if (sendVia === 'gmail') {
+          if (!gmailToken) { results.push({ vendor, ok: false, error: 'Gmail not connected' }); continue }
+          const r = await sendGmailEmail(gmailToken, vendor.email, subject, body, attachments)
+          if (r.error) { results.push({ vendor, ok: false, error: r.error.message }); continue }
+        } else {
+          const outlookAttachments = attachments.map(a => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.name, contentType: a.mimeType, contentBytes: a.data,
+          }))
+          const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: {
+                subject,
+                body: { contentType: 'Text', content: body },
+                toRecipients: [{ emailAddress: { address: vendor.email } }],
+                attachments: outlookAttachments,
+              }
+            }),
+          })
+          if (res.status === 401) {
+            localStorage.removeItem('outlook_token'); setOutlookToken('')
+            results.push({ vendor, ok: false, error: 'Token expired' }); continue
+          }
+          if (res.status !== 202) {
+            let msg = `HTTP ${res.status}`
+            try { const j = await res.json(); msg = j?.error?.message || msg } catch {}
+            results.push({ vendor, ok: false, error: msg }); continue
+          }
         }
-        if (res.status !== 202) {
-          let errMsg = `Outlook send failed (${res.status}).`
-          try { const j = await res.json(); errMsg += ' ' + (j?.error?.message || JSON.stringify(j)) } catch {}
-          setSendError(errMsg); setSending(false); return
-        }
-      }
-      // Auto-log each consultant submission to Tracker
-      const jobTitle = jobReq?.title || subject || 'Untitled Role'
-      for (const c of selectedConsultants) {
-        await supabase.from('submissions').insert({
-          consultant_id: c.id,
-          vendor_id: selectedVendor.id,
-          job_title: jobTitle,
-          status: 'submitted',
-          submitted_at: new Date().toISOString(),
-        })
-      }
 
-      setSent(true)
-      setTimeout(() => setSent(false), 4000)
+        // Log to Tracker
+        for (const c of selectedConsultants) {
+          await supabase.from('submissions').insert({
+            consultant_id: c.id,
+            vendor_id: vendor.id,
+            job_title: jobTitle,
+            status: 'submitted',
+            submitted_at: new Date().toISOString(),
+          })
+        }
+        results.push({ vendor, ok: true })
+      } catch (e) {
+        results.push({ vendor, ok: false, error: e.message })
+      }
+    }
+
+    setSendProgress('')
+    setSendResults(results)
+    setSending(false)
+
+    // Reset form if all succeeded
+    if (results.every(r => r.ok)) {
       setBody('')
       setSubject('')
-      setSelectedVendor(null)
-    } catch (e) {
-      setSendError('Send failed: ' + e.message)
+      setSelectedVendors([])
     }
-    setSending(false)
   }
 
-  const canSend = (sendVia === 'gmail' ? gmailConnected : outlookConnected) && !!body && !!subject && !!selectedVendor
+  const canSend = (sendVia === 'gmail' ? gmailConnected : outlookConnected) && !!body && !!subject && selectedVendors.length > 0
+
+  const successCount = sendResults.filter(r => r.ok).length
+  const failCount = sendResults.filter(r => !r.ok).length
 
   return (
     <div style={{ padding: '32px 36px', maxWidth: 1300 }}>
@@ -283,13 +317,12 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
       <div style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, color: '#111827', letterSpacing: '-0.5px' }}>HotDesk</h1>
-          <p style={{ color: '#6b7280', fontSize: 14, marginTop: 4 }}>Match consultants to a job, then send to vendors — all in one flow</p>
+          <p style={{ color: '#6b7280', fontSize: 14, marginTop: 4 }}>Match consultants to a job, then blast to multiple vendors at once</p>
         </div>
-        {/* Send via toggle (always visible) */}
         <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4 }}>
           {[
-            { key: 'gmail', label: 'Gmail', connected: gmailConnected, color: '#ea4335' },
-            { key: 'outlook', label: 'Outlook', connected: outlookConnected, color: '#0078d4' },
+            { key: 'gmail', label: 'Gmail', connected: gmailConnected },
+            { key: 'outlook', label: 'Outlook', connected: outlookConnected },
           ].map(({ key, label, connected }) => (
             <button key={key} onClick={() => setSendVia(key)}
               style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
@@ -304,10 +337,10 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
       </div>
 
       {/* Step tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 24, background: '#f3f4f6', borderRadius: 12, padding: 4, width: 'fit-content' }}>
+      <div style={{ display: 'flex', marginBottom: 24, background: '#f3f4f6', borderRadius: 12, padding: 4, width: 'fit-content' }}>
         {[
           { key: 'match', label: '1. Match Consultants', icon: Zap },
-          { key: 'send', label: '2. Compose & Send', icon: Send },
+          { key: 'send', label: '2. Compose & Blast', icon: Send },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key}
             onClick={() => key === 'send' && matches.length > 0 ? goToSend() : key === 'match' ? setStep('match') : null}
@@ -321,16 +354,32 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
         ))}
       </div>
 
-      {sent && (
-        <div style={{ background: '#d1fae5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '13px 18px', color: '#065f46', fontSize: 13, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <CheckCircle size={16} /> Email sent via {sendVia === 'gmail' ? 'Gmail' : 'Outlook'} — {selectedConsultants.length > 0 ? `${selectedConsultants.length} submission${selectedConsultants.length > 1 ? 's' : ''} logged in Tracker` : 'logged in Tracker'}
+      {/* Send results banner */}
+      {sendResults.length > 0 && (
+        <div style={{ marginBottom: 20, borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 18px', background: successCount === sendResults.length ? '#d1fae5' : failCount === sendResults.length ? '#fef2f2' : '#fef3c7',
+            display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #e5e7eb' }}>
+            <CheckCircle size={15} color={successCount === sendResults.length ? '#065f46' : '#92400e'} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: successCount === sendResults.length ? '#065f46' : '#92400e' }}>
+              {successCount} sent · {failCount} failed · {successCount * selectedConsultants.length} submissions logged in Tracker
+            </span>
+          </div>
+          <div style={{ background: '#fff' }}>
+            {sendResults.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', borderBottom: i < sendResults.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
+                <span style={{ fontSize: 13, color: r.ok ? '#10b981' : '#ef4444', fontWeight: 700 }}>{r.ok ? '✓' : '✗'}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{r.vendor.company}</span>
+                {r.vendor.email && <span style={{ fontSize: 12, color: '#9ca3af' }}>{r.vendor.email}</span>}
+                {!r.ok && <span style={{ fontSize: 12, color: '#ef4444', marginLeft: 'auto' }}>{r.error}</span>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* ── STEP 1: MATCH ── */}
       {step === 'match' && (
         <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 20, alignItems: 'start' }}>
-          {/* Left */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={card}>
               <div style={{ padding: '20px 20px 0' }}>
@@ -346,7 +395,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                   width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                   background: matching || !jdText.trim() ? '#a5b4fc' : '#6c63ff',
                   color: '#fff', border: 'none', borderRadius: 10, padding: '13px',
-                  fontSize: 14, fontWeight: 600, cursor: matching || !jdText.trim() ? 'not-allowed' : 'pointer', transition: 'background 0.15s'
+                  fontSize: 14, fontWeight: 600, cursor: matching || !jdText.trim() ? 'not-allowed' : 'pointer'
                 }}>
                   {matching ? <><Loader size={15} style={{ animation: 'spin 1s linear infinite' }} /> Analyzing...</> : <><Zap size={15} /> Match Consultants</>}
                 </button>
@@ -379,11 +428,8 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
             )}
           </div>
 
-          {/* Right: Results */}
           <div>
-            {matchError && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 18px', color: '#991b1b', fontSize: 13, marginBottom: 16 }}>{matchError}</div>
-            )}
+            {matchError && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 18px', color: '#991b1b', fontSize: 13, marginBottom: 16 }}>{matchError}</div>}
 
             {!matching && !matchError && matches.length === 0 && (
               <div style={{ ...card, padding: '64px 32px', textAlign: 'center' }}>
@@ -406,30 +452,27 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
             {matches.length > 0 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <p style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>{matches.length} consultant{matches.length !== 1 ? 's' : ''} ranked · {selectedConsultants.length} selected</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>{matches.length} ranked · {selectedConsultants.length} selected</p>
                   {selectedConsultants.length > 0 && (
                     <button onClick={goToSend}
                       style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                      Send to Vendor <ArrowRight size={14} />
+                      Compose & Blast <ArrowRight size={14} />
                     </button>
                   )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {matches.map((m, i) => {
-                    const isSelected = selectedConsultants.find(x => x.id === m.id)
+                    const isSelected = !!selectedConsultants.find(x => x.id === m.id)
                     return (
                       <div key={m.id} style={{ ...card, overflow: 'hidden', outline: isSelected ? '2px solid #6c63ff' : 'none' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px' }}>
-                          {/* Checkbox */}
                           <div onClick={() => toggleConsultant(m.consultant)}
                             style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${isSelected ? '#6c63ff' : '#d1d5db'}`, background: isSelected ? '#6c63ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}>
                             {isSelected && <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>✓</span>}
                           </div>
-                          {/* Rank */}
                           <div style={{ width: 30, height: 30, background: i === 0 ? '#fef3c7' : '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: i === 0 ? '#92400e' : '#6b7280', flexShrink: 0 }}>
                             #{i + 1}
                           </div>
-                          {/* Info */}
                           <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setExpanded(expanded === i ? null : i)}>
                             <p style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{m.consultant.name}</p>
                             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -443,17 +486,12 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                             </div>
                           </div>
                         </div>
-
                         {expanded === i && (
-                          <div style={{ padding: '0 20px 18px', borderTop: '1px solid #f3f4f6', paddingTop: 14 }}>
+                          <div style={{ padding: '14px 20px 18px', borderTop: '1px solid #f3f4f6' }}>
                             <p style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>AI Analysis</p>
                             <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, background: '#f9fafb', borderRadius: 8, padding: '12px 14px', marginBottom: 14 }}>{m.reason}</p>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                              {[
-                                ['Skills', m.consultant.skills],
-                                ['Experience', m.consultant.experience ? `${m.consultant.experience} years` : '—'],
-                                ['Email', m.consultant.email || '—'],
-                              ].map(([label, val]) => (
+                              {[['Skills', m.consultant.skills], ['Experience', m.consultant.experience ? `${m.consultant.experience} years` : '—'], ['Email', m.consultant.email || '—']].map(([label, val]) => (
                                 <div key={label} style={{ background: '#f9fafb', borderRadius: 8, padding: '10px 12px' }}>
                                   <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</p>
                                   <p style={{ fontSize: 12, color: '#374151', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</p>
@@ -466,7 +504,6 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                     )
                   })}
                 </div>
-
                 {selectedConsultants.length > 0 && (
                   <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
                     <button onClick={goToSend}
@@ -484,16 +521,15 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
       {/* ── STEP 2: SEND ── */}
       {step === 'send' && (
         <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20, alignItems: 'start' }}>
-          {/* Left */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Selected consultants */}
+            {/* Consultants */}
             <div style={card}>
               <div style={{ padding: '14px 18px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Users size={14} color="#6c63ff" />
                 <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Consultants</span>
                 <span style={{ marginLeft: 'auto', fontSize: 12, color: '#6c63ff', fontWeight: 600 }}>{selectedConsultants.length} selected</span>
               </div>
-              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                 {matches.map((m) => {
                   const isSelected = !!selectedConsultants.find(x => x.id === m.id)
                   return (
@@ -504,7 +540,7 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
                       <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${isSelected ? '#6c63ff' : '#d1d5db'}`, background: isSelected ? '#6c63ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         {isSelected && <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>✓</span>}
                       </div>
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
                         <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{m.consultant.name}</p>
                         <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{m.consultant.visa_status} · ${m.consultant.rate}/hr</p>
                       </div>
@@ -515,28 +551,44 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
               </div>
             </div>
 
-            {/* Vendor selector */}
+            {/* Vendors — multi-select */}
             <div style={card}>
               <div style={{ padding: '14px 18px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Building2 size={14} color="#6c63ff" />
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Select Vendor</span>
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Select Vendors</span>
+                {selectedVendors.length > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: '#6c63ff', fontWeight: 600 }}>{selectedVendors.length} selected</span>
+                )}
               </div>
-              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              {vendors.length > 1 && (
+                <div style={{ padding: '8px 18px', borderBottom: '1px solid #f9fafb', display: 'flex', gap: 8 }}>
+                  <button onClick={() => setSelectedVendors(vendors)}
+                    style={{ fontSize: 11, fontWeight: 600, color: '#6c63ff', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    Select all ({vendors.length})
+                  </button>
+                  <span style={{ color: '#d1d5db' }}>·</span>
+                  <button onClick={() => setSelectedVendors([])}
+                    style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    Clear
+                  </button>
+                </div>
+              )}
+              <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                 {vendors.length === 0 ? (
                   <p style={{ padding: '18px', fontSize: 13, color: '#9ca3af', textAlign: 'center' }}>No vendors found. <a href="/vendors" style={{ color: '#6c63ff' }}>Add vendors →</a></p>
                 ) : vendors.map(v => {
-                  const selected = selectedVendor?.id === v.id
+                  const selected = !!selectedVendors.find(x => x.id === v.id)
                   return (
-                    <div key={v.id} onClick={() => setSelectedVendor(selected ? null : v)}
+                    <div key={v.id} onClick={() => toggleVendor(v)}
                       style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #f9fafb', background: selected ? '#f5f3ff' : 'transparent' }}
                       onMouseOver={e => !selected && (e.currentTarget.style.background = '#fafafa')}
                       onMouseOut={e => !selected && (e.currentTarget.style.background = 'transparent')}>
-                      <div style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${selected ? '#6c63ff' : '#d1d5db'}`, background: selected ? '#6c63ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        {selected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 700 }}>✓</span>}
+                      <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${selected ? '#6c63ff' : '#d1d5db'}`, background: selected ? '#6c63ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {selected && <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>✓</span>}
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <p style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{v.company}</p>
-                        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{v.contact_name || ''} {v.email ? `· ${v.email}` : '· No email'}</p>
+                        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{v.contact_name || ''}{v.email ? ` · ${v.email}` : ' · No email'}</p>
                       </div>
                     </div>
                   )
@@ -560,9 +612,9 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <p style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Compose Email</p>
-                {selectedVendor && (
-                  <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>To: {selectedVendor.contact_name || selectedVendor.company} {selectedVendor.email ? `<${selectedVendor.email}>` : '(no email)'}</p>
-                )}
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                  {selectedVendors.length === 0 ? 'No vendors selected' : selectedVendors.length === 1 ? `To: ${selectedVendors[0].company}` : `To: ${selectedVendors.length} vendors`}
+                </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280' }}>
@@ -608,14 +660,23 @@ Write subject line on first line starting with "Subject: ", then leave a blank l
 
               {sendError && <p style={{ fontSize: 13, color: '#ef4444', background: '#fef2f2', padding: '10px 14px', borderRadius: 8, border: '1px solid #fecaca' }}>{sendError}</p>}
 
+              {sendProgress && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#6c63ff', fontWeight: 600 }}>
+                  <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                  {sendProgress}
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button onClick={() => { setSubject(''); setBody('') }}
                   style={{ padding: '10px 18px', fontSize: 14, fontWeight: 600, color: '#6b7280', background: '#f3f4f6', border: 'none', borderRadius: 9, cursor: 'pointer' }}>
                   Clear
                 </button>
-                <button onClick={handleSend} disabled={sending || !canSend}
+                <button onClick={handleBulkSend} disabled={sending || !canSend}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 22px', fontSize: 14, fontWeight: 600, color: '#fff', background: sending || !canSend ? '#a5b4fc' : '#6c63ff', border: 'none', borderRadius: 9, cursor: sending || !canSend ? 'not-allowed' : 'pointer' }}>
-                  {sending ? <><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Sending...</> : <><Send size={14} /> Send via {sendVia === 'gmail' ? 'Gmail' : 'Outlook'}</>}
+                  {sending
+                    ? <><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Sending...</>
+                    : <><Send size={14} /> {selectedVendors.length > 1 ? `Blast to ${selectedVendors.length} Vendors` : 'Send Email'}</>}
                 </button>
               </div>
             </div>
