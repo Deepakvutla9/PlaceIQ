@@ -91,7 +91,9 @@ export default function HotDesk() {
   const [expanded, setExpanded] = useState(null)
 
   // Step 2 — Send
+  const [gmailToken] = useState(localStorage.getItem('gmail_token') || '')
   const [outlookToken, setOutlookToken] = useState(localStorage.getItem('outlook_token') || '')
+  const [sendVia, setSendVia] = useState(localStorage.getItem('outlook_token') ? 'outlook' : localStorage.getItem('gmail_token') ? 'gmail' : 'outlook')
   const [reconnecting, setReconnecting] = useState(false)
   const [vendors, setVendors] = useState([])
   const [selectedConsultants, setSelectedConsultants] = useState([])
@@ -119,6 +121,7 @@ export default function HotDesk() {
   const [savingTemplate, setSavingTemplate] = useState(false)
   const templateDropdownRef = useRef()
 
+  const gmailConnected = !!gmailToken
   const outlookConnected = !!outlookToken
 
   async function reconnectOutlook() {
@@ -337,18 +340,20 @@ ${SIGN_OFF}`
 
     // Force-refresh Outlook token before sending
     let freshToken = null
-    try {
-      freshToken = await refreshAccessToken()
-      localStorage.setItem('outlook_token', freshToken)
-      setOutlookToken(freshToken)
-    } catch {
-      freshToken = await getValidOutlookToken()
-    }
-    if (!freshToken) {
-      localStorage.removeItem('outlook_token')
-      setOutlookToken('')
-      setSendError('Outlook session expired. Click Connect in the top right to reconnect.')
-      setSending(false); return
+    if (sendVia === 'outlook') {
+      try {
+        freshToken = await refreshAccessToken()
+        localStorage.setItem('outlook_token', freshToken)
+        setOutlookToken(freshToken)
+      } catch {
+        freshToken = await getValidOutlookToken()
+      }
+      if (!freshToken) {
+        localStorage.removeItem('outlook_token')
+        setOutlookToken('')
+        setSendError('Outlook session expired. Reconnect Outlook in the top right.')
+        setSending(false); return
+      }
     }
 
     const results = []
@@ -367,30 +372,44 @@ ${SIGN_OFF}`
         const vendorName = vendor.contact_name?.trim() || 'Team'
         const personalizedBody = body.replace('{{VENDOR_NAME}}', vendorName)
 
-        const outlookAttachments = attachments.map(a => ({
-          '@odata.type': '#microsoft.graph.fileAttachment',
-          name: a.name, contentType: a.mimeType, contentBytes: a.data,
-        }))
-        const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: {
-              subject,
-              body: { contentType: 'Text', content: personalizedBody },
-              toRecipients: [{ emailAddress: { address: vendor.email } }],
-              attachments: outlookAttachments,
+        if (sendVia === 'gmail') {
+          if (!gmailToken) { results.push({ vendor, ok: false, error: 'Gmail not connected' }); continue }
+          const r = await sendGmailEmail(gmailToken, vendor.email, subject, personalizedBody, attachments)
+          if (r.error) {
+            const isAuthError = r.error.code === 401 || r.error.status === 'UNAUTHENTICATED'
+            if (isAuthError) {
+              localStorage.removeItem('gmail_token')
+              setSendError('Gmail session expired. Go to Job Inbox to reconnect Gmail.')
+              setSending(false); setSendResults([]); return
             }
-          }),
-        })
-        if (res.status === 401) {
-          localStorage.removeItem('outlook_token'); setOutlookToken('')
-          results.push({ vendor, ok: false, error: 'Token expired' }); continue
-        }
-        if (res.status !== 202) {
-          let msg = `HTTP ${res.status}`
-          try { const j = await res.json(); msg = j?.error?.message || msg } catch {}
-          results.push({ vendor, ok: false, error: msg }); continue
+            results.push({ vendor, ok: false, error: r.error.message }); continue
+          }
+        } else {
+          const outlookAttachments = attachments.map(a => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.name, contentType: a.mimeType, contentBytes: a.data,
+          }))
+          const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: {
+                subject,
+                body: { contentType: 'Text', content: personalizedBody },
+                toRecipients: [{ emailAddress: { address: vendor.email } }],
+                attachments: outlookAttachments,
+              }
+            }),
+          })
+          if (res.status === 401) {
+            localStorage.removeItem('outlook_token'); setOutlookToken('')
+            results.push({ vendor, ok: false, error: 'Token expired' }); continue
+          }
+          if (res.status !== 202) {
+            let msg = `HTTP ${res.status}`
+            try { const j = await res.json(); msg = j?.error?.message || msg } catch {}
+            results.push({ vendor, ok: false, error: msg }); continue
+          }
         }
 
         // Log to Tracker
@@ -421,7 +440,7 @@ ${SIGN_OFF}`
     }
   }
 
-  const canSend = outlookConnected && !!body && !!subject && selectedVendors.length > 0
+  const canSend = (sendVia === 'gmail' ? gmailConnected : outlookConnected) && !!body && !!subject && selectedVendors.length > 0
 
   const successCount = sendResults.filter(r => r.ok).length
   const failCount = sendResults.filter(r => !r.ok).length
@@ -434,16 +453,20 @@ ${SIGN_OFF}`
           <h1 style={{ fontSize: 26, fontWeight: 700, color: '#111827', letterSpacing: '-0.5px' }}>HotDesk</h1>
           <p style={{ color: '#6b7280', fontSize: 14, marginTop: 4 }}>Match consultants to a job, then blast to multiple vendors at once</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f3f4f6', borderRadius: 10, padding: '8px 16px' }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: outlookConnected ? '#10b981' : '#ef4444', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Outlook</span>
-          {!outlookConnected && (
-            <button onClick={reconnectOutlook} disabled={reconnecting}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#0078d4', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 600, cursor: reconnecting ? 'not-allowed' : 'pointer', marginLeft: 4 }}>
-              {reconnecting ? <Loader size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={11} />}
-              {reconnecting ? 'Connecting...' : 'Connect'}
+        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4 }}>
+          {[
+            { key: 'gmail', label: 'Gmail', connected: gmailConnected },
+            { key: 'outlook', label: 'Outlook', connected: outlookConnected },
+          ].map(({ key, label, connected }) => (
+            <button key={key} onClick={() => setSendVia(key)}
+              style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+                background: sendVia === key ? '#fff' : 'transparent',
+                color: sendVia === key ? '#111827' : '#6b7280',
+                boxShadow: sendVia === key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: connected ? '#10b981' : '#d1d5db', flexShrink: 0 }} />
+              {label}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -770,7 +793,7 @@ ${SIGN_OFF}`
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280' }}>
                   <Mail size={13} />
-                  via <strong style={{ color: '#0078d4' }}>Outlook</strong>
+                  via <strong style={{ color: sendVia === 'gmail' ? '#ea4335' : '#0078d4' }}>{sendVia === 'gmail' ? 'Gmail' : 'Outlook'}</strong>
                 </div>
                 {(selectedConsultants.filter(c => c.resume_url).length > 0 || extraFiles.length > 0) && (
                   <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>
@@ -780,7 +803,13 @@ ${SIGN_OFF}`
               </div>
             </div>
 
-            {!outlookConnected && (
+            {sendVia === 'gmail' && !gmailConnected && (
+              <div style={{ margin: '16px 20px 0', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span>Gmail not connected or session expired.</span>
+                <a href="/inbox" style={{ background: '#f59e0b', color: '#fff', padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, textDecoration: 'none', flexShrink: 0 }}>Reconnect Gmail →</a>
+              </div>
+            )}
+            {sendVia === 'outlook' && !outlookConnected && (
               <div style={{ margin: '16px 20px 0', background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px', color: '#1e40af', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <span>Outlook token expired or not connected.</span>
                 <button onClick={reconnectOutlook} disabled={reconnecting}
