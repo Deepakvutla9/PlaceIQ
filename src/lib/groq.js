@@ -39,7 +39,15 @@ export async function matchConsultants(jobReq, consultants) {
     `${i + 1}. ID:${c.id} | ${c.name} | Skills: ${c.skills} | Visa: ${c.visa_status} | Location: ${c.location} | Rate: $${c.rate}/hr`
   ).join('\n')
 
-  const prompt = `You are a bench sales recruiter AI. Score each consultant for this job (0-100) based on skill match, visa eligibility, location, and rate fit.
+  const prompt = `You are a strict bench sales recruiter AI. Score each consultant for this job (0-100) based PRIMARILY on skill and role match.
+
+Scoring rules:
+- If the consultant's skills and background do NOT match the job role at all, score must be 0-15. Do not give high scores out of generosity.
+- If there is partial overlap (some transferable skills), score 20-50.
+- If skills mostly match but not perfectly, score 51-79.
+- Only score 80+ if the consultant is a strong direct match for the role and required skills.
+- A .NET developer should score 0-15 for a Product Manager role. A Java developer should score 0-15 for a Data Scientist role. Be strict.
+
 Return ONLY a valid JSON array, no markdown, no explanation:
 [{"id": "exact_consultant_id", "score": 85, "reason": "brief reason"}]
 
