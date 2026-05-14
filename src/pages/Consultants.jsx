@@ -22,7 +22,7 @@ const STATUS_STYLE = {
   upcoming:    { bg: '#f3f4f6', color: '#374151' },
 }
 
-const EMPTY_FORM = { name: '', legal_name: '', email: '', phone: '', skills: '', visa_status: 'H1B', location: '', open_to_relocate: '', rate: '', experience: '', status: 'bench', employment_type: '', notes: '', available_from: '', ssn_last4: '', interview_timings: '', dob: '', linkedin_url: '', reference1: '', reference2: '' }
+const EMPTY_FORM = { name: '', legal_name: '', email: '', phone: '', title: '', skills: '', visa_status: 'H1B', location: '', open_to_relocate: '', rate: '', experience: '', status: 'bench', employment_type: '', notes: '', available_from: '', ssn_last4: '', interview_timings: '', dob: '', linkedin_url: '', reference1: '', reference2: '' }
 
 function Field({ label, children }) {
   return (
@@ -79,6 +79,7 @@ export default function Consultants() {
         name: parsed.name || f.name,
         email: parsed.email || f.email,
         phone: parsed.phone || f.phone,
+        title: parsed.title || f.title,
         skills: parsed.skills || f.skills,
         experience: parsed.experience || f.experience,
         location: parsed.location || f.location,
@@ -160,7 +161,7 @@ export default function Consultants() {
   }
 
   function handleEdit(c) {
-    setForm({ name: c.name, legal_name: c.legal_name || '', email: c.email || '', phone: c.phone || '', skills: c.skills, visa_status: c.visa_status, location: c.location, open_to_relocate: c.open_to_relocate || '', rate: c.rate, experience: c.experience || '', status: c.status, employment_type: c.employment_type || '', notes: c.notes || '', available_from: c.available_from || '', ssn_last4: c.ssn_last4 || '', interview_timings: c.interview_timings || '', dob: c.dob || '', linkedin_url: c.linkedin_url || '', reference1: c.reference1 || '', reference2: c.reference2 || '' })
+    setForm({ name: c.name, legal_name: c.legal_name || '', email: c.email || '', phone: c.phone || '', title: c.title || '', skills: c.skills, visa_status: c.visa_status, location: c.location, open_to_relocate: c.open_to_relocate || '', rate: c.rate, experience: c.experience || '', status: c.status, employment_type: c.employment_type || '', notes: c.notes || '', available_from: c.available_from || '', ssn_last4: c.ssn_last4 || '', interview_timings: c.interview_timings || '', dob: c.dob || '', linkedin_url: c.linkedin_url || '', reference1: c.reference1 || '', reference2: c.reference2 || '' })
     setEditing(c.id)
     setResumeFile(null)
     setShowForm(true)
@@ -412,6 +413,9 @@ export default function Consultants() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Field label="Full Name *">
                   <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="John Smith" />
+                </Field>
+                <Field label="Job Title">
+                  <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder=".NET Developer, Java Developer..." />
                 </Field>
                 <Field label="Email">
                   <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="john@email.com" />

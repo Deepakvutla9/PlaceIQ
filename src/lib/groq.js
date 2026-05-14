@@ -36,17 +36,18 @@ ${jdText}`
 
 export async function matchConsultants(jobReq, consultants) {
   const consultantList = consultants.map((c, i) =>
-    `${i + 1}. ID:${c.id} | ${c.name} | Skills: ${c.skills} | Visa: ${c.visa_status} | Location: ${c.location} | Rate: $${c.rate}/hr`
+    `${i + 1}. ID:${c.id} | ${c.name} | Title: ${c.title || 'Unknown'} | Skills: ${c.skills} | Visa: ${c.visa_status} | Location: ${c.location} | Rate: $${c.rate}/hr`
   ).join('\n')
 
   const prompt = `You are a strict bench sales recruiter AI. Score each consultant for this job (0-100) based PRIMARILY on skill and role match.
 
 Scoring rules:
-- If the consultant's skills and background do NOT match the job role at all, score must be 0-15. Do not give high scores out of generosity.
-- If there is partial overlap (some transferable skills), score 20-50.
-- If skills mostly match but not perfectly, score 51-79.
-- Only score 80+ if the consultant is a strong direct match for the role and required skills.
-- A .NET developer should score 0-15 for a Product Manager role. A Java developer should score 0-15 for a Data Scientist role. Be strict.
+- The consultant's Title is the most important signal. If their title does not match the job role, score must be 0-20 regardless of skills listed.
+- A ".NET Developer" title for a "Product Manager" job = 0-10. A "Java Developer" for a "Data Scientist" = 0-10. Be strict.
+- Skills listed on a resume do NOT override a mismatched title. People list many skills but their title reflects what they actually do.
+- If title matches but skills are partial, score 40-70.
+- If title and skills both match well, score 70-90.
+- Only score 90+ for an exact match on title, skills, and experience.
 
 Return ONLY a valid JSON array, no markdown, no explanation:
 [{"id": "exact_consultant_id", "score": 85, "reason": "brief reason"}]

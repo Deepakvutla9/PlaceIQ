@@ -38,6 +38,7 @@ export async function parseResumeWithAI(resumeText) {
   "name": "full name",
   "email": "email address or empty string",
   "phone": "phone number or empty string",
+  "title": "the person's current or most recent job title exactly as it appears on the resume (e.g. .NET Developer, Java Developer, Product Manager)",
   "skills": "comma separated list of technical skills",
   "experience": "total years of experience as a number or empty string",
   "location": "city, state or empty string"
